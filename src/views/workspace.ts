@@ -8,6 +8,7 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
   const pickerAnchor=document.createComment("project");projectPicker.before(pickerAnchor);
   const fileTree=h("div",{class:"workspace-files"});
   const output=h("pre",{class:"workspace-output"});
+  const outputFiles=h("div",{class:"workspace-files"});
   const editor=h("textarea",{class:"workspace-editor","aria-label":"File editor",spellcheck:"false"}) as HTMLTextAreaElement;
   const fileLabel=h("span",{text:"No file open"});
   const notice=h("div",{class:"workspace-notice",role:"status"});
@@ -45,10 +46,10 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
       }})));
     }catch { /* The operation status displays the error. */ }
   }
-  async function openFile(path:string) {
+  async function openFile(path:string,line=1) {
     if(busy)return;
     if(selectedFile && editor.value!==savedText && !window.confirm("Discard unsaved file changes?"))return;
-    try {const result=await tool("filesystem.read",{path});selectedFile=path;editor.value=String(result.content ?? "");savedText=editor.value;fileLabel.textContent=path;editor.readOnly=false;sync();}
+    try {const result=await tool("filesystem.read",{path});selectedFile=path;editor.value=String(result.content ?? "");savedText=editor.value;fileLabel.textContent=path;editor.readOnly=false;sync();const offset=editor.value.split("\n").slice(0,Math.max(0,line-1)).join("\n").length;editor.focus();editor.setSelectionRange(offset,offset);editor.scrollTop=Math.max(0,line-1)*18;}
     catch { /* Keep the previously opened file. */ }
   }
   const save=h("button",{text:"Save file",onclick:async()=> {
@@ -62,19 +63,33 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
   const parent=h("button",{text:"↑",title:"Parent directory",onclick:()=> {if(busy)return;const previous=previousDirectories.pop();if(previous)void list(previous);}}) as HTMLButtonElement;
   left.append(h("div",{class:"workspace-controls"},parent,refresh));
   const terminalControls=h("div",{class:"workspace-controls"});
+  const gitFiles=h("textarea",{"aria-label":"Git file paths",placeholder:"Git file paths, one per line"}) as HTMLTextAreaElement;
+  const commitMessage=h("input",{"aria-label":"Commit message",placeholder:"Commit message"}) as HTMLInputElement;
+  const branchName=h("input",{"aria-label":"Branch name",placeholder:"Branch name"}) as HTMLInputElement;
   function action(label:string,name:string,input:()=>Record<string,unknown>) {
-    const button=h("button",{text:label,onclick:async()=> {if(busy)return;try {const result=await tool(name,input());output.textContent=typeof result.stdout==="string" ? `${result.stdout}\n${result.stderr || ""}\nExit: ${result.exitCode ?? "unknown"}` : JSON.stringify(result,null,2);}catch {}}}) as HTMLButtonElement;
+    const button=h("button",{text:label,onclick:async()=> {if(busy)return;try {
+      const result=await tool(name,input());output.textContent=typeof result.stdout==="string" ? `${result.stdout}\n${result.stderr || ""}\nExit: ${result.exitCode ?? "unknown"}` : JSON.stringify(result,null,2);
+      const references=(Array.isArray(result.results) ? result.results : name==="git.conflicts" ? String(result.stdout||"").split(/\r?\n/).filter(Boolean).map(file=>({file:`${cwd()}\\${file}`,line:1})) : []) as {file:string;line?:number;startLine?:number}[];
+      outputFiles.replaceChildren(...references.map(reference=>h("button",{class:"workspace-file",text:`${reference.file}:${reference.line || reference.startLine || 1}`,onclick:()=>void openFile(reference.file,reference.line || reference.startLine || 1)})));
+    }catch {}}}) as HTMLButtonElement;
     terminalControls.append(button);return button;
   }
   const cwd=()=>State.settings.projects.find(project=>project.id===State.chatProjectId)?.gitRepo || State.settings.projects.find(project=>project.id===State.chatProjectId)?.folder || "";
   action("Run","powershell.run",()=>({script:script.value,cwd:cwd()}));
   action("Git status","git.status",()=>({cwd:cwd()}));action("Diff","git.diff",()=>({cwd:cwd()}));
+  action("Staged diff","git.diff",()=>({cwd:cwd(),staged:true}));
+  const files=()=>gitFiles.value.split(/\r?\n/).map(file=>file.trim()).filter(Boolean);
+  action("Stage","git.stage",()=>({cwd:cwd(),files:files()}));action("Unstage","git.unstage",()=>({cwd:cwd(),files:files()}));
+  action("Commit","git.commit",()=>({cwd:cwd(),message:commitMessage.value}));
+  action("Branches","git.branch",()=>({cwd:cwd(),mode:"list"}));action("Create branch","git.branch",()=>({cwd:cwd(),mode:"create",branch:branchName.value}));action("Switch branch","git.branch",()=>({cwd:cwd(),mode:"switch",branch:branchName.value}));
+  action("History","git.log",()=>({cwd:cwd()}));action("Conflicts","git.conflicts",()=>({cwd:cwd()}));
+  action("Find text","repository.search",()=>({cwd:cwd(),query:search.value}));
   action("Search","project.search",()=>({query:search.value,projectId:State.chatProjectId}));
-  action("Tests","powershell.run",()=>({script:"npm test",cwd:cwd()}));
-  action("Lint","powershell.run",()=>({script:"npm run lint",cwd:cwd()}));
-  action("Build","powershell.run",()=>({script:"npm run build",cwd:cwd()}));
+  action("Tests","coding.test",()=>({...(script.value.trim()?{script:script.value}:{}),cwd:cwd()}));
+  action("Lint","coding.lint",()=>({...(script.value.trim()?{script:script.value}:{}),cwd:cwd()}));
+  action("Build","coding.build",()=>({...(script.value.trim()?{script:script.value}:{}),cwd:cwd()}));
   const footer=h("section",{class:"workspace-pane workspace-bottom"},h("div",{class:"workspace-editor-header"},fileLabel,save),editor,
-    h("h3",{text:"Terminal / Git / search / test logs"}),h("div",{class:"workspace-command-row"},script,search),terminalControls,notice,output);
+    h("h3",{text:"Terminal / Git / search / test logs"}),h("div",{class:"workspace-command-row"},script,search),h("details",{},h("summary",{text:"Git actions"}),h("div",{class:"workspace-command-row"},gitFiles,commitMessage,branchName)),terminalControls,notice,outputFiles,output);
   right.append(runView.el,runStatus);
   root.prepend(left);root.append(right,footer);
   function sync() {

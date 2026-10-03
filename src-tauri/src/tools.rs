@@ -15,7 +15,8 @@ pub struct ToolRequest {
 
 pub fn category(name: &str) -> Option<&'static str> {
     Some(match name {
-        "filesystem.read" | "filesystem.list" | "git.status" | "git.diff" | "git.log" => "read",
+        "filesystem.read" | "filesystem.list" | "git.status" | "git.diff" | "git.log" | "git.conflicts" | "repository.search" => "read",
+        "coding.test" | "coding.lint" | "coding.build" => "run",
         "project.index" | "project.search" => "read",
         "agent.plan" | "agent.delegate" => "read",
         "filesystem.write" | "git.stage" | "git.unstage" | "git.commit" | "git.branch" => "write",
@@ -58,9 +59,11 @@ pub fn schemas() -> Vec<Value> {
     tools.push(json!({"type":"function","function":{"name":"agent.delegate","description":"Ask an isolated local model helper to analyze a focused task. This helper has no tools.","parameters":{"type":"object","properties":{"goal":{"type":"string"},"model":{"type":"string"},"name":{"type":"string"}},"required":["goal"]}}}));
     tools.push(json!({"type":"function","function":{"name":"project.index","description":"Incrementally index a project with local embeddings respecting gitignore","parameters":{"type":"object","properties":{"projectId":{"type":"string"}}}}}));
     tools.push(json!({"type":"function","function":{"name":"project.search","description":"Search project embeddings and return relevant file/line excerpts","parameters":{"type":"object","properties":{"projectId":{"type":"string"},"query":{"type":"string"}},"required":["query"]}}}));
-    for operation in ["status", "diff", "log", "stage", "unstage", "commit", "branch"] {
-        tools.push(json!({"type":"function","function":{"name":format!("git.{operation}"),"description":format!("Git {operation} in a repository"),"parameters":{"type":"object","properties":{"cwd":{"type":"string"},"files":{"type":"array","items":{"type":"string"}},"message":{"type":"string"},"branch":{"type":"string"}},"required":["cwd"]}}}));
+    for operation in ["status", "diff", "log", "stage", "unstage", "commit", "branch","conflicts"] {
+        tools.push(json!({"type":"function","function":{"name":format!("git.{operation}"),"description":format!("Git {operation} in a repository"),"parameters":{"type":"object","properties":{"cwd":{"type":"string"},"files":{"type":"array","items":{"type":"string"}},"message":{"type":"string"},"branch":{"type":"string"},"mode":{"type":"string","enum":["list","create","switch"]},"staged":{"type":"boolean"}},"required":["cwd"]}}}));
     }
+    tools.push(json!({"type":"function","function":{"name":"repository.search","description":"Find literal text in repository files respecting gitignore","parameters":{"type":"object","properties":{"cwd":{"type":"string"},"query":{"type":"string"}},"required":["cwd","query"]}}}));
+    for action in ["test","lint","build"] {tools.push(json!({"type":"function","function":{"name":format!("coding.{action}"),"description":format!("Run a project's {action} command after permission"),"parameters":{"type":"object","properties":{"cwd":{"type":"string"},"script":{"type":"string"}},"required":["cwd"]}}}));}
     tools
 }
 
@@ -93,6 +96,23 @@ async fn ps(script: &str, input: &Value, cwd: Option<&str>) -> Result<Value, Str
 pub async fn execute(app: &AppHandle, request: &ToolRequest) -> Result<Value, String> {
     let input = &request.input;
     match request.name.as_str() {
+        "repository.search"=> {
+            let cwd=text(input,"cwd")?.to_string();let query=text(input,"query")?.to_string();
+            tokio::task::spawn_blocking(move|| {
+                let mut results=Vec::new();
+                for entry in ignore::WalkBuilder::new(&cwd).require_git(false).build().flatten() {
+                    if !entry.file_type().is_some_and(|kind|kind.is_file()) {continue;}
+                    let Ok(text)=std::fs::read_to_string(entry.path()) else {continue};
+                    for (line,content) in text.lines().enumerate() {if content.contains(&query) {results.push(json!({"file":entry.path(),"line":line+1,"text":content.chars().take(1000).collect::<String>()}));if results.len()>=200 {return Ok(json!({"results":results,"truncated":true}));}}}
+                }
+                Ok(json!({"results":results,"truncated":false}))
+            }).await.map_err(|error|error.to_string())?
+        },
+        name if name.starts_with("coding.") => {
+            let cwd=text(input,"cwd")?;
+            let default=match name {"coding.test"=>"npm test","coding.lint"=>"npm run lint","coding.build"=>"npm run build",_=>return Err("Unknown coding action".into())};
+            ps(input["script"].as_str().filter(|script|!script.trim().is_empty()).unwrap_or(default),&json!({}),Some(cwd)).await
+        },
         "agent.plan"=> {let steps=input["steps"].as_array().ok_or("Provide plan steps")?;if steps.iter().any(|step|!step.is_string()) {return Err("Plan steps must be strings".into());}Ok(json!({"steps":steps}))},
         "agent.delegate"=> {
             use tauri::Manager;
@@ -163,11 +183,17 @@ pub async fn execute(app: &AppHandle, request: &ToolRequest) -> Result<Value, St
         name if name.starts_with("git.") => {
             let mut args: Vec<String> = match name {
                 "git.status" => vec!["status".into(),"--short".into(),"--branch".into()],
-                "git.diff" => vec!["diff".into()], "git.log" => vec!["log".into(),"-20".into(),"--oneline".into()],
+                "git.diff" => if input["staged"].as_bool()==Some(true) {vec!["diff".into(),"--cached".into()]}else{vec!["diff".into()]}, "git.log" => vec!["log".into(),"-20".into(),"--oneline".into()],
+                "git.conflicts"=>vec!["diff".into(),"--name-only".into(),"--diff-filter=U".into()],
                 "git.stage" => vec!["add".into(),"--".into()],
                 "git.unstage" => vec!["restore".into(),"--staged".into(),"--".into()],
                 "git.commit" => vec!["commit".into(),"-m".into(),text(input,"message")?.into()],
-                "git.branch" => vec!["branch".into(),"--".into(),text(input,"branch")?.into()],
+                "git.branch" => match input["mode"].as_str().unwrap_or(if input["branch"].is_string(){"create"}else{"list"}) {
+                    "list"=>vec!["branch".into(),"--list".into()],
+                    "create"=>vec!["branch".into(),"--".into(),text(input,"branch")?.into()],
+                    "switch"=>vec!["switch".into(),"--".into(),text(input,"branch")?.into()],
+                    _=>return Err("Unknown branch operation".into()),
+                },
                 _ => return Err("Unknown Git operation".into()),
             };
             if matches!(name,"git.stage"|"git.unstage") {

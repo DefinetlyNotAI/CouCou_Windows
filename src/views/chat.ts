@@ -62,18 +62,28 @@ export async function reopenChat(id: string): Promise<boolean> {
   }
 }
 
-function bubble(message: ChatMessage, sources: ChatSource[] = []): HTMLElement {
+function bubble(message: ChatMessage, sources: ChatSource[] = [],openFile?:(path:string,line:number)=>void): HTMLElement {
   if (message.role === "user") {
     return h("div", { class: "chat-row user" }, h("div", { class: "bubble", text: message.content }));
   }
   const reply = h("div", { class: "reply markdown" });
   reply.innerHTML = DOMPurify.sanitize(marked.parse(message.content, { async: false, gfm: true }), {
     USE_PROFILES: { html: true }, FORBID_TAGS: ["img", "style", "input", "button", "form"], FORBID_ATTR: ["style"],
+    ALLOWED_URI_REGEXP:/^(?:https?:|file:\/\/\/|[a-z]:[\\/]|[\w .\\/-]+\.[\w]+(?:#L?\d+)?$)/i,
   });
   for (const link of reply.querySelectorAll<HTMLAnchorElement>("a")) {
     link.addEventListener("click", event => {
       event.preventDefault();
-      if (/^https?:\/\//i.test(link.getAttribute("href") ?? "")) void Bridge.openUrl(link.href);
+      const href=link.getAttribute("href") ?? "";
+      if (/^https?:\/\//i.test(href)) void Bridge.openUrl(link.href);
+      else if(openFile && (/^(file:\/\/\/|[a-z]:[\\/])/i.test(href) || /^[\w .\\/-]+\.[\w]+(?:#L?\d+)?$/.test(href))) {
+        try {
+          const line=Number(href.match(/#L?(\d+)$/)?.[1] || 1);
+          let path=decodeURIComponent(href.replace(/#L?\d+$/,"").replace(/^file:\/\/\//i,""));
+          if(!/^[a-z]:[\\/]/i.test(path)) {const project=State.settings.projects.find(project=>project.id===State.chatProjectId);if(!project)return;path=`${project.folder}\\${path}`;}
+          openFile(path,line);
+        }catch { }
+      }
     });
   }
   if (sources.length) {
@@ -88,7 +98,7 @@ function bubble(message: ChatMessage, sources: ChatSource[] = []): HTMLElement {
   return h("div", { class: "chat-row" }, reply);
 }
 
-export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: string) => void): ViewHost {
+export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: string) => void,toggleFullscreen:()=>void): ViewHost {
   State.loadChats();
   const chipRow = h("div", { class: "chip-row" });
   const log = h("div", { class: "chat-log", "aria-live": "polite" });
@@ -767,7 +777,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
         renderedKey = key;
         clear(log);
         for (const message of State.chatHistory) if (message.content) {
-          const row = bubble(message, sources.get(message.id));
+          const row = bubble(message, sources.get(message.id),(path,line)=>{if(!State.fullscreen)toggleFullscreen();void workspace.openFile(path,line);});
           const actions = h("div", { class: "message-actions" });
           for (const action of ["branch", "edit", ...(message.role === "assistant" ? ["regenerate"] : [])] as const) {
             const button = h("button", { class: "link-btn", text: action === "regenerate" ? "Regenerate (selected model)" : action === "edit" ? "Edit" : "Branch", onclick: () => void branch(message, action as "branch" | "edit" | "regenerate") }) as HTMLButtonElement;

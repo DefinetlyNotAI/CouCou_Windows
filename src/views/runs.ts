@@ -18,11 +18,11 @@ export function buildRuns(pause:(paused:boolean)=>void,stop:()=>void,diff:()=>vo
     const detail=(label:string,text:string)=>h("details",{},h("summary",{text:label}),h("pre",{text}));
     const filesRead=run.calls.filter(call=>call.name==="filesystem.read").map(call=>call.input.path);
     const filesChanged=run.calls.filter(call=>call.name==="filesystem.write" && !call.error && call.result).map(call=>call.input.path);
-    const commands=run.calls.filter(call=>call.name==="powershell.run" || call.name==="terminal.run");
+    const commands=run.calls.filter(call=>call.name==="powershell.run" || call.name==="terminal.run" || call.name.startsWith("coding."));
     body.append(h("strong",{text:run.goal}),h("div",{text:`${run.model} · ${run.status}`}),controls,
       detail("Plan",run.plan.length ? run.plan.join("\n") : "No plan recorded yet."),detail("Current action",run.action),
       detail("Files read",filesRead.join("\n")),detail("Files changed",filesChanged.join("\n")),
-      detail("Commands",JSON.stringify(commands,null,2)),detail("Tests",JSON.stringify(commands.filter(call=>/\b(test|pytest|vitest|jest)\b/i.test(JSON.stringify(call.input))),null,2)),
+      detail("Commands",JSON.stringify(commands,null,2)),detail("Tests",JSON.stringify(commands.filter(call=>call.name==="coding.test" || /\b(test|pytest|vitest|jest)\b/i.test(JSON.stringify(call.input))),null,2)),
       detail("Tool calls",JSON.stringify(run.calls,null,2)),detail("Permissions requested",JSON.stringify(run.permissions,null,2)),detail("Result",run.result));
   }
   return {el,sync};

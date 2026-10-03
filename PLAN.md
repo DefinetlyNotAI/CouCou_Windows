@@ -1,6 +1,6 @@
 # CouCou implementation plan
 
-Status: stages 1–14 implementation landed; runtime verification remains partial as recorded below. Stage 15 is next. Preserve the full 20-stage scope and one implementation commit per stage. User requested no further test execution; use compilation and diff inspection only for subsequent stages.
+Status: stages 1–15 implementation landed; runtime verification remains partial as recorded below. Stage 16 is next. Preserve the full 20-stage scope and one implementation commit per stage. User requested no further test execution; use compilation and diff inspection only for subsequent stages.
 
 Stage 1 changes implemented so far: sanitized Markdown, scroll-position preservation during generation, removable attachments, uploads without chat reset, attachment context on later turns, removal of the 200 KB text cap, compact service mascots, chat-only TPS, 0–100% audio volume, exact island bounds for drag entry, native file picker, running-app picker, mascot hover-animation wake-up, and locally saved chats that reopen from recent activity with conversation text restored to either backend.
 
@@ -40,7 +40,9 @@ Stage 13: fullscreen file browser/editor with save and unsaved-change protection
 
 Stage 14: stored Agent Run history with goal/model/plan/current action/files/commands/tests/tools/permission decisions/result; pause/resume at action boundaries, stop, diff inspection and existing approve/deny controls. Native/browser pause waits exclude paused time from application deadlines. Structured agent.plan and isolated no-tool local helpers; actual delegation triggers helper mascot communication. Frontend/native compilation passed; no tests executed. Runtime journeys remain unverified.
 
-Stages 15–20 remain pending. Runtime checks listed above remain part of the full-goal verification scope; implementation commits do not claim those checks passed. The existing release installer predates these changes and needs rebuilding before delivery.
+Stage 15: Git status/working/staged diffs, stage/unstage, commits, branch list/create/switch, history and conflict-file links; literal repository search and file/line links; structured test/lint/build actions with configurable PowerShell commands; model file references open in the fullscreen editor. Commands remain permission gated. Frontend/native compilation passed; no tests executed; Git mutation/runtime journeys remain unverified.
+
+Stages 16–20 remain pending. Runtime checks listed above remain part of the full-goal verification scope; implementation commits do not claim those checks passed. The existing release installer predates these changes and needs rebuilding before delivery.
 
 ---
 

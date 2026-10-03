@@ -292,7 +292,7 @@ export function buildViews(
   map.set("confused", buildConfused());
   map.set("note", buildNote());
   map.set("settings", buildSettings(actions));
-  map.set("prompt", buildPrompt(onChatHeightChange, id => { State.setFocus(id); actions.setView("overview"); }));
+  map.set("prompt", buildPrompt(onChatHeightChange, id => { State.setFocus(id); actions.setView("overview"); },()=>actions.toggleFullscreen()));
   map.set("upload", buildUpload());
   map.set("uploading", buildUploading());
   map.set("choose", buildChoose(actions));
