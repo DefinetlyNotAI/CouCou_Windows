@@ -4,6 +4,7 @@ import "./settings.css";
 import { Bridge, onEvent } from "../core/bridge";
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
 import { h, clear } from "../views/dom";
+import { agentsSection } from "./agents";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
 let version = "";
@@ -563,6 +564,7 @@ async function main() {
     provider,
     providerDetails,
     chatOptionsSection(keyPresent, keyCheckError),
+    agentsSection(settings, save),
     integrationsSection(present),
     generalSection(),
   );

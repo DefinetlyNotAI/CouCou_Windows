@@ -237,3 +237,7 @@ select option {
   background: rgba(244, 80, 94, 0.14);
   color: #ff8d97;
 }
+:root .agent-editor { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+.agent-field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; min-width: 0; }
+.agent-field:has(textarea) { grid-column: 1 / -1; }
+.agent-field textarea { min-height: 70px; resize: vertical; }

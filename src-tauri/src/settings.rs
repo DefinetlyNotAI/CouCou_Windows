@@ -43,6 +43,8 @@ pub struct Settings {
     pub agent_profile: String,
     #[serde(default)]
     pub agent_prompt: String,
+    #[serde(default)]
+    pub agent_profiles: Vec<serde_json::Value>,
 }
 
 fn enabled() -> bool {
@@ -100,7 +102,20 @@ impl Default for Settings {
             browser_model: default_browser_model(),
             agent_profile: default_agent_profile(),
             agent_prompt: String::new(),
+            agent_profiles: Vec::new(),
         }
+    }
+}
+
+impl Settings {
+    pub fn active_agent(&self) -> Option<&serde_json::Value> {
+        self.agent_profiles.iter().find(|profile| profile["id"].as_str() == Some(self.agent_profile.as_str()))
+    }
+    pub fn agent_tools(&self, mut tools: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+        if let Some(allowed) = self.active_agent().and_then(|agent| agent["tools"].as_array()).filter(|tools| !tools.is_empty()) {
+            tools.retain(|tool| allowed.iter().any(|name| name == &tool["function"]["name"]));
+        }
+        tools
     }
 }
 

@@ -7,6 +7,7 @@ import type {
   MLCEngineInterface,
 } from "@mlc-ai/web-llm";
 import { Bridge, type ChatContext, type ChatProgress, type ChatSource } from "./bridge";
+import type { AgentProfile } from "./agents";
 
 export interface BrowserAISettings {
   browserModel: string;
@@ -14,6 +15,8 @@ export interface BrowserAISettings {
   webSearchEnabled: boolean;
   chatTimeoutSeconds: number;
   agentPrompt?: string;
+  agentProfile?: string;
+  agentProfiles?: AgentProfile[];
 }
 
 type WebLLM = typeof import("@mlc-ai/web-llm");
@@ -215,7 +218,8 @@ class BrowserAIClient {
 
     const webllm = await (webLLMLoading ??= import("@mlc-ai/web-llm"));
     this.assertActive(active);
-    const engine = await this.ensureEngine(active, webllm, settings.browserModel);
+    const contextSize = settings.agentProfiles?.find(profile => profile.id === settings.agentProfile)?.contextSize ?? 4096;
+    const engine = await this.ensureEngine(active, webllm, settings.browserModel, contextSize);
 
     const timeoutSeconds = clampTimeout(settings.chatTimeoutSeconds);
     let timeoutId: number | undefined;
@@ -235,8 +239,9 @@ class BrowserAIClient {
     }
   }
 
-  private async ensureEngine(active: ActiveTurn, webllm: WebLLM, modelId: string): Promise<MLCEngineInterface> {
-    if (this.engine && this.loadedModel === modelId) return this.engine;
+  private loadedContextSize = 0;
+  private async ensureEngine(active: ActiveTurn, webllm: WebLLM, modelId: string, contextSize: number): Promise<MLCEngineInterface> {
+    if (this.engine && this.loadedModel === modelId && this.loadedContextSize === contextSize) return this.engine;
     this.discardEngine();
     this.assertActive(active);
 
@@ -262,13 +267,14 @@ class BrowserAIClient {
     });
     const init = webllm.CreateWebWorkerMLCEngine(worker, modelId, {
       initProgressCallback: (report: InitProgressReport) => this.progress(active, "loading", report.text),
-    });
+    }, { context_window_size: contextSize });
 
     try {
       const engine = await Promise.race([init, initTimeout, active.cancelledPromise]);
       this.assertActive(active);
       this.engine = engine;
       this.loadedModel = modelId;
+      this.loadedContextSize = contextSize;
       return engine;
     } catch (error) {
       if (this.worker === worker) this.discardEngine();
@@ -286,9 +292,11 @@ class BrowserAIClient {
     webllm: WebLLM,
   ): Promise<{ text: string; sources: ChatSource[] }> {
     const supportsFunctionCalling = webllm.functionCallingModelIds.includes(settings.browserModel);
+    const profile = settings.agentProfiles?.find(profile => profile.id === settings.agentProfile);
     const tools = settings.toolsEnabled && supportsFunctionCalling
       ? (await Bridge.browserTools()).filter(isChatTool).filter((tool) =>
           ALLOWED_TOOLS.has(tool.function.name) &&
+          (!profile?.tools.length || profile.tools.includes(tool.function.name)) &&
           (settings.webSearchEnabled || !tool.function.name.startsWith("web_")),
         )
       : [];
@@ -310,6 +318,7 @@ class BrowserAIClient {
         stream: true,
         stream_options: { include_usage: true },
         max_tokens: 1024,
+        temperature: profile?.temperature ?? 0.7,
         ...(tools.length ? { tools, tool_choice: "auto" as const } : {}),
       });
       const chunks = completion as AsyncIterable<ChatCompletionChunk>;

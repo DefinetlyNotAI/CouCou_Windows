@@ -4,7 +4,8 @@ import { ICONS } from "./icons";
 import { Bridge, IS_TAURI, onEvent, type ChatContext, type ChatProgress, type ChatSource } from "../core/bridge";
 import { BrowserAI } from "../core/browser-ai";
 import { Sound } from "../core/sound";
-import { State, INTEGRATION_AGENTS, QUICK_PROFILES, type ChatMessage } from "../core/state";
+import { State, INTEGRATION_AGENTS, type ChatMessage } from "../core/state";
+import { profiles, selectAgent } from "../core/agents";
 import type { ViewHost } from "./views";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
@@ -79,7 +80,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   const status = h("div", { class: "chat-status", role: "status" });
   const modelPicker = h("select", { class: "chat-picker", "aria-label": "Chat model" }) as HTMLSelectElement;
   const profilePicker = h("select", { class: "chat-picker", "aria-label": "Agent profile" }) as HTMLSelectElement;
-  for (const profile of QUICK_PROFILES) profilePicker.append(h("option", { value: profile.id, text: profile.name }));
+  for (const profile of profiles(State.settings)) profilePicker.append(h("option", { value: profile.id, text: profile.name }));
   const recentPicker = h("select", { class: "chat-picker", "aria-label": "Recent chats" }) as HTMLSelectElement;
   const pickerRefresh = h("button", { class: "chat-reset", title: "Refresh models", "aria-label": "Refresh models" }, svg("M17.65 6.35A7.95 7.95 0 0012 4a8 8 0 108 8h-2a6 6 0 11-1.76-4.24L13 11h7V4l-2.35 2.35z", 13)) as HTMLButtonElement;
   const toolbar = h("div", { class: "chat-toolbar" }, modelPicker, pickerRefresh, profilePicker, recentPicker);
@@ -130,6 +131,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   let recentKey = "";
   let queueKey = "";
   let activityKey = "";
+  let profilesKey = "";
   let taskKey = "";
   let desktopBusy = false;
   async function desktopAction(mode: "screenshot" | "clipboard" | "copy") {
@@ -186,11 +188,15 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     State.notify();
   });
   profilePicker.addEventListener("change", async () => {
-    const profile = QUICK_PROFILES.find(profile => profile.id === profilePicker.value);
+    const profile = profiles(State.settings).find(profile => profile.id === profilePicker.value);
     if (!profile) return;
     const previous = { id: State.settings.agentProfile, prompt: State.settings.agentPrompt };
-    State.settings.agentProfile = profile.id;
-    State.settings.agentPrompt = profile.prompt;
+    selectAgent(State.settings, profile);
+    if (profile.model) {
+      State.chatModels ??= { ollama: State.settings.ollamaModel, browser: State.settings.browserModel };
+      State.chatModels[State.settings.chatBackend] = profile.model;
+      State.saveChat();
+    }
     try { if (IS_TAURI) await Bridge.saveSettings(State.settings); }
     catch (error) {
       if (State.settings.agentProfile === profile.id) { State.settings.agentProfile = previous.id; State.settings.agentPrompt = previous.prompt; }
@@ -576,6 +582,11 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
       modelPicker.title = selectedModel || "Choose a model";
       modelPicker.disabled = State.chatBusy || State.voiceBusy || refreshingModels;
       pickerRefresh.disabled = State.chatBusy || refreshingModels;
+      const newProfilesKey = JSON.stringify(State.settings.agentProfiles);
+      if (newProfilesKey !== profilesKey) {
+        profilesKey = newProfilesKey;
+        profilePicker.replaceChildren(...profiles(State.settings).map(profile => h("option", { value: profile.id, text: profile.name })));
+      }
       profilePicker.value = State.settings.agentProfile;
       profilePicker.disabled = State.chatBusy || State.voiceBusy;
       const newRecentKey = JSON.stringify(State.savedChats.map(chat => [chat.id, chat.updatedAt]));

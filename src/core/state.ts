@@ -2,6 +2,7 @@
 
 import type { BotEmoteName, BotStateName, IslandMode, IslandViewName } from "./layout";
 import type { EyeShape } from "../mochi/engine";
+import type { AgentProfile } from "./agents";
 
 export type AgentSource = "ollama" | "n8n";
 export type PillBadge = "finished" | "error";
@@ -84,6 +85,7 @@ export interface Settings {
   browserModel: string;
   agentProfile: string;
   agentPrompt: string;
+  agentProfiles: AgentProfile[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -109,6 +111,7 @@ export const DEFAULT_SETTINGS: Settings = {
   browserModel: "Llama-3.2-1B-Instruct-q4f16_1-MLC",
   agentProfile: "general",
   agentPrompt: "",
+  agentProfiles: [],
 };
 
 type Listener = () => void;

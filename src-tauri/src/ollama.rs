@@ -221,7 +221,7 @@ async fn run_turn<F: Fn(ChatProgress) + Send + Sync>(
     let info = model_info(&settings.ollama_url, &settings.ollama_model).await?;
     let key = if settings.web_search_enabled { secrets::get("ollama-web-key") } else { None };
     let tools =
-        if settings.tools_enabled && info.tools { tool_schemas(key.is_some()) } else { Vec::new() };
+        if settings.tools_enabled && info.tools { settings.agent_tools(tool_schemas(key.is_some())) } else { Vec::new() };
     let mut message = json!({ "role": "user", "content": query });
     {
         match context {
@@ -253,6 +253,10 @@ async fn run_turn<F: Fn(ChatProgress) + Send + Sync>(
     loop {
         emit(progress(request_id, "generating", "Generating reply…", None));
         let mut body = json!({"model":settings.ollama_model, "messages":messages, "stream":true, "options":{"num_predict":1024}});
+        if let Some(agent) = settings.active_agent() {
+            body["options"]["temperature"] = json!(agent["temperature"].as_f64().unwrap_or(0.7).clamp(0.0, 2.0));
+            body["options"]["num_ctx"] = json!(agent["contextSize"].as_u64().unwrap_or(4096).clamp(512, 131072));
+        }
         if !tools.is_empty() {
             body["tools"] = json!(tools);
         }
@@ -430,7 +434,7 @@ async fn stream_reply<F: Fn(ChatProgress) + Send + Sync>(
 
 pub fn browser_tools(settings: &Settings) -> Vec<Value> {
     if !settings.tools_enabled { return Vec::new(); }
-    tool_schemas(settings.web_search_enabled && secrets::get("ollama-web-key").is_some())
+    settings.agent_tools(tool_schemas(settings.web_search_enabled && secrets::get("ollama-web-key").is_some()))
 }
 
 #[derive(Serialize)]
