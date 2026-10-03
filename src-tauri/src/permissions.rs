@@ -20,7 +20,9 @@ pub async fn authorize(app: &AppHandle, request: &ToolRequest) -> Result<(), Str
     let program = request.input["program"].as_str().unwrap_or("").to_lowercase();
     let category = if base_category == "run" && (request.input["admin"].as_bool() == Some(true) || script.contains("runas") || program.ends_with("runas.exe") || program == "runas") { "admin" } else { base_category };
     let shared = app.state::<Shared>();
-    let settings = shared.settings.lock().unwrap().clone();
+    let settings = shared.settings.lock().unwrap().for_project(&request.project_id);
+    let project=settings.projects.iter().find(|project| project["id"].as_str()==Some(request.project_id.as_str()));
+    if project.and_then(|project| project["permissions"].get(&request.name)).and_then(Value::as_str)==Some("deny") { return Err("Tool denied by project".into()); }
     if settings.active_agent().and_then(|profile| profile["permissions"].get(&request.name)).and_then(Value::as_str) == Some("deny") {
         return Err("Tool denied by agent profile".into());
     }

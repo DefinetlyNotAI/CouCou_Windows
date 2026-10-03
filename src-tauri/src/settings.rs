@@ -52,6 +52,8 @@ pub struct Settings {
     #[serde(default)]
     pub search_url: String,
     #[serde(default)] pub mcp_servers: Vec<crate::mcp::Server>,
+    #[serde(default)] pub projects: Vec<serde_json::Value>,
+    #[serde(default)] pub active_project_id: String,
 }
 
 fn enabled() -> bool {
@@ -115,11 +117,26 @@ impl Default for Settings {
             search_provider: default_search_provider(),
             search_url: String::new(),
             mcp_servers: Vec::new(),
+            projects: Vec::new(),
+            active_project_id: String::new(),
         }
     }
 }
 
 impl Settings {
+    pub fn for_project(&self, id: &str) -> Self {
+        let mut settings=self.clone(); settings.active_project_id=id.into();
+        if let Some(project)=self.projects.iter().find(|project|project["id"].as_str()==Some(id)) {
+            if let Some(agent_id)=project["agentId"].as_str().filter(|id|!id.is_empty()) {
+                settings.agent_profile=agent_id.into();
+                if let Some(agent)=settings.active_agent() {
+                    settings.agent_prompt=format!("{}\nResponse style: {}",agent["systemPrompt"].as_str().unwrap_or_default(),agent["personality"]);
+                }
+            }
+            settings.agent_prompt=format!("{}\n\nProject: {}\nFolder: {}\nInstructions: {}\nMemory: {}",settings.agent_prompt,project["name"].as_str().unwrap_or_default(),project["folder"].as_str().unwrap_or_default(),project["instructions"].as_str().unwrap_or_default(),project["memory"].as_str().unwrap_or_default());
+        }
+        settings
+    }
     pub fn active_agent(&self) -> Option<&serde_json::Value> {
         self.agent_profiles.iter().find(|profile| profile["id"].as_str() == Some(self.agent_profile.as_str()))
     }

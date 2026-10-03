@@ -6,6 +6,7 @@ import { DEFAULT_SETTINGS, type Settings } from "../core/state";
 import { h, clear } from "../views/dom";
 import { agentsSection } from "./agents";
 import { mcpSection } from "./mcp";
+import { projectsSection } from "./projects";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
 let version = "";
@@ -576,6 +577,7 @@ async function main() {
     agentsSection(settings, save),
     permissionsSection(),
     mcpSection(settings,save),
+    projectsSection(settings,save),
     integrationsSection(present),
     generalSection(),
   );

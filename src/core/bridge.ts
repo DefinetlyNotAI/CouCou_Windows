@@ -70,6 +70,7 @@ export const Bridge = {
   chatCancel: (requestId: string) => call<void>("chat_cancel", { requestId }),
   toolRun: (request: { name: string; input: Record<string, unknown>; chatId: string; projectId?: string }) => callOrThrow<unknown>("tool_run", { request }),
   toolDecision: (id: string, decision: string) => callOrThrow<void>("tool_decision", { id, decision }),
+  projectAttach: (folder: string) => callOrThrow<{ folder:string; name:string; gitRepo:string }>("project_attach",{folder}),
   toolSchemas: (chatId?: string, projectId?: string) => callOrThrow<unknown[]>("tool_schemas", { chatId, projectId }),
   voiceRun: (requestId: string, mode: "capabilities" | "listen" | "speak", text = "", volume = 100) =>
     callOrThrow<{ text?: string; voices?: string[]; languages?: string[] }>("voice_run", { requestId, mode, text, volume }),

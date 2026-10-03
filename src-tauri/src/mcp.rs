@@ -53,8 +53,10 @@ async fn connect(app: &AppHandle, server: &Server, chat_id: &str, project_id: &s
 pub async fn schemas(app: &AppHandle, settings: &crate::settings::Settings, chat_id: &str, project_id: &str) -> Result<Vec<Value>,String> {
     let mut tools = Vec::new();
     let allowed = settings.active_agent().and_then(|profile| profile["mcpServers"].as_array());
+    let project_servers = settings.projects.iter().find(|project| project["id"].as_str()==Some(project_id)).and_then(|project| project["mcpServers"].as_array());
     for server in &settings.mcp_servers {
         if !server.enabled || server.permissions == "deny" || allowed.is_some_and(|ids| !ids.is_empty() && !ids.iter().any(|id| id.as_str() == Some(&server.id))) { continue; }
+        if project_servers.is_some_and(|ids| !ids.is_empty() && !ids.iter().any(|id| id.as_str()==Some(&server.id))) { continue; }
         let client = connect(app,server,chat_id,project_id).await?;
         let list = tokio::time::timeout(std::time::Duration::from_secs(30),client.peer().list_all_tools()).await.map_err(|_| "MCP tools/list timed out")?.map_err(|error| error.to_string())?;
         for tool in list {
@@ -68,8 +70,9 @@ pub async fn call(app: &AppHandle, request: &crate::tools::ToolRequest) -> Resul
     let mut parts = request.name.splitn(3,'.'); parts.next();
     let server_id = parts.next().ok_or("Missing MCP server")?;
     let tool = parts.next().ok_or("Missing MCP tool")?;
-    let settings = app.state::<crate::Shared>().settings.lock().unwrap().clone();
+    let settings = app.state::<crate::Shared>().settings.lock().unwrap().for_project(&request.project_id);
     if settings.active_agent().and_then(|profile| profile["mcpServers"].as_array()).is_some_and(|ids| !ids.is_empty() && !ids.iter().any(|id| id.as_str() == Some(server_id))) { return Err("MCP server disabled for this agent".into()); }
+    if settings.projects.iter().find(|project|project["id"].as_str()==Some(request.project_id.as_str())).and_then(|project|project["mcpServers"].as_array()).is_some_and(|ids|!ids.is_empty()&&!ids.iter().any(|id|id.as_str()==Some(server_id))) { return Err("MCP server disabled for this project".into()); }
     let server = settings.mcp_servers.iter().find(|server| server.id == server_id).ok_or("Unknown MCP server")?;
     let client = connect(app,server,&request.chat_id,&request.project_id).await?;
     let available = client.peer().list_all_tools().await.map_err(|error| error.to_string())?;

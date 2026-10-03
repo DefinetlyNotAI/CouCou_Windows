@@ -33,10 +33,21 @@ async fn tool_run(app: AppHandle, request: tools::ToolRequest) -> Result<serde_j
 #[tauri::command]
 fn tool_decision(id: String, decision: String) -> Result<(),String> { permissions::decide(id,decision) }
 #[tauri::command]
+async fn project_attach(folder: String) -> Result<serde_json::Value,String> {
+    let folder=std::path::PathBuf::from(folder);
+    if !folder.is_absolute() { return Err("Enter an absolute Windows folder path".into()); }
+    let folder=tokio::fs::canonicalize(folder).await.map_err(|error|error.to_string())?;
+    if !folder.is_dir() { return Err("Choose a folder".into()); }
+    let name=folder.file_name().unwrap_or_default().to_string_lossy();
+    let git=if folder.join(".git").exists() { folder.to_string_lossy().to_string() } else { String::new() };
+    Ok(serde_json::json!({"folder":folder,"name":name,"gitRepo":git}))
+}
+#[tauri::command]
 async fn tool_schemas(app: AppHandle, shared: State<'_, Shared>, chat_id: Option<String>, project_id: Option<String>) -> Result<Vec<serde_json::Value>,String> {
-    let settings = shared.settings.lock().unwrap().clone();
+    let project_id=project_id.unwrap_or_default();
+    let settings = shared.settings.lock().unwrap().for_project(&project_id);
     let mut tools = settings.agent_tools(tools::schemas().into_iter().filter(|tool| settings.web_search_enabled || !tool["function"]["name"].as_str().unwrap_or_default().starts_with("web.")).collect());
-    tools.extend(mcp::schemas(&app,&settings,&chat_id.unwrap_or_default(),&project_id.unwrap_or_default()).await?);
+    tools.extend(mcp::schemas(&app,&settings,&chat_id.unwrap_or_default(),&project_id).await?);
     Ok(tools)
 }
 
@@ -167,8 +178,9 @@ async fn chat_send(
     chat_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<ChatReply, String> {
-    chat.set_runtime(app.clone(), chat_id.unwrap_or_default(), project_id.unwrap_or_default());
-    let mut settings = shared.settings.lock().unwrap().clone();
+    let project_id=project_id.unwrap_or_default();
+    chat.set_runtime(app.clone(), chat_id.unwrap_or_default(), project_id.clone());
+    let mut settings = shared.settings.lock().unwrap().for_project(&project_id);
     if let Some(model) = model { settings.ollama_model = model; }
     ollama::send(&chat, &settings, &request_id, query, context, |event| {
         if !matches!(event.phase.as_str(), "streaming" | "thinking") {
@@ -403,6 +415,7 @@ pub fn run() {
             tool_run,
             tool_decision,
             tool_schemas,
+            project_attach,
             save_settings,
             set_collapsed,
             set_island_rect,

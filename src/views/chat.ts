@@ -28,6 +28,7 @@ export async function reopenChat(id: string): Promise<boolean> {
     State.chatModels = chat.models ? { ...chat.models } : null;
     State.chatParentId = chat.parentId;
     State.chatBranchMessageId = chat.branchMessageId;
+    State.chatProjectId = chat.projectId ?? "";
     nextId = Math.max(nextId, ...chat.messages.map(message => message.id + 1));
     State.droppedFile = null;
     State.promptContext = null;
@@ -154,6 +155,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   let queueKey = "";
   let activityKey = "";
   let profilesKey = "";
+  let projectsKey = "";
   let taskKey = "";
   let desktopBusy = false;
   async function desktopAction(mode: "screenshot" | "clipboard" | "copy") {
@@ -185,7 +187,18 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   const copyReply = h("button", { class: "link-btn", text: "Copy reply", onclick: () => void desktopAction("copy") }) as HTMLButtonElement;
   const streamMode = h("button", { class: "link-btn", text: "Stream live", onclick: () => { State.streamResponses = !State.streamResponses; State.notify(); } }) as HTMLButtonElement;
   const continueReply = h("button", { class: "link-btn", text: "Continue reply", onclick: () => launch("Continue your previous response from where you stopped. Avoid repeating it.", null) }) as HTMLButtonElement;
-  quickMenu.append(searchWeb, screenshot, pasteClipboard, copyReply, streamMode, continueReply);
+  const projectPicker = h("select", { class: "chat-picker", "aria-label":"Chat project" }) as HTMLSelectElement;
+  projectPicker.addEventListener("change",async()=> {
+    State.chatProjectId=projectPicker.value;
+    State.settings.activeProjectId=projectPicker.value;
+    const project=State.settings.projects.find(project=>project.id===projectPicker.value);
+    const profile=profiles(State.settings).find(profile=>profile.id===project?.agentId);
+    if(profile) { selectAgent(State.settings,profile); if(profile.model) { State.chatModels ??= {ollama:State.settings.ollamaModel,browser:State.settings.browserModel}; State.chatModels[State.settings.chatBackend]=profile.model; } }
+    State.saveChat();
+    try { if(IS_TAURI) await Bridge.saveSettings(State.settings); } catch(error) { State.chatStatus=String(error); }
+    State.notify();
+  });
+  quickMenu.append(projectPicker,searchWeb, screenshot, pasteClipboard, copyReply, streamMode, continueReply);
   function currentModel() { return State.chatModels?.[State.settings.chatBackend] ?? (State.settings.chatBackend === "browser" ? State.settings.browserModel : State.settings.ollamaModel); }
   let refreshingModels = false;
   async function refreshModels() {
@@ -259,6 +272,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
 
   async function runVoice(mode: "listen" | "speak", text = "") {
     const requestId = crypto.randomUUID();
+    State.chatProjectId ??= State.settings.activeProjectId;
     voiceRequestId = requestId;
     voiceMode = mode;
     State.voiceBusy = true;
@@ -428,6 +442,10 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     const requestId = crypto.randomUUID();
     State.chatModels ??= { ollama: State.settings.ollamaModel, browser: State.settings.browserModel };
     const settings = { ...State.settings };
+    const project=State.settings.projects.find(project=>project.id===State.chatProjectId);
+    const projectAgent=profiles(settings).find(profile=>profile.id===project?.agentId);
+    if(projectAgent) selectAgent(settings,projectAgent);
+    const browserSettings={...settings,agentPrompt:project ? `${settings.agentPrompt}\n\nProject: ${project.name}\nFolder: ${project.folder}\nInstructions: ${project.instructions}\nMemory: ${project.memory}` : settings.agentPrompt};
     settings.ollamaModel = State.chatModels?.ollama ?? settings.ollamaModel;
     settings.browserModel = State.chatModels?.browser ?? settings.browserModel;
     streamLive = State.streamResponses;
@@ -461,8 +479,8 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
         listening.then(() => {
           if (State.chatRequestId !== requestId || stopping) throw new Error("Reply stopped.");
           return activeBackend === "browser"
-            ? BrowserAI.send(requestId, query, context, { ...settings, chatId: State.chatId }, handleProgress)
-            : Bridge.chatSend(requestId, query, context, settings.ollamaModel, State.chatId);
+            ? BrowserAI.send(requestId, query, context, { ...browserSettings, browserModel:settings.browserModel, chatId: State.chatId, projectId:State.chatProjectId }, handleProgress)
+            : Bridge.chatSend(requestId, query, context, settings.ollamaModel, State.chatId,State.chatProjectId);
         }),
         new Promise<never>((_, reject) => {
           const seconds = Math.max(30, Math.min(600, settings.chatTimeoutSeconds)) + (activeBackend === "browser" ? 605 : 5);
@@ -525,6 +543,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     State.chatId = crypto.randomUUID();
     State.chatModels = null;
     State.chatParentId = undefined; State.chatBranchMessageId = undefined;
+    State.chatProjectId=State.settings.activeProjectId;
     State.chatHistory = [];
     State.droppedFile = null;
     State.promptContext = null;
@@ -591,6 +610,10 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
         }, h("i", { style: `background:${task.color}` }), h("span", { text: task.name }), h("span", { text: task.state }))));
       }
       streamMode.textContent = State.streamResponses ? "Stream live" : "Show when complete";
+      const newProjectsKey=JSON.stringify(State.settings.projects.map(project=>[project.id,project.name]));
+      if(newProjectsKey!==projectsKey) { projectsKey=newProjectsKey; projectPicker.replaceChildren(h("option",{value:"",text:"No project"}),...State.settings.projects.map(project=>h("option",{value:project.id,text:project.name}))); }
+      projectPicker.value=State.chatProjectId ?? State.settings.activeProjectId;
+      projectPicker.disabled=State.chatBusy || State.voiceBusy || resetting;
       streamMode.setAttribute("aria-pressed", String(State.streamResponses));
       continueReply.disabled = State.chatBusy || State.voiceBusy || resetting || State.chatHistory.at(-1)?.role !== "assistant";
       const selectedModel = currentModel();

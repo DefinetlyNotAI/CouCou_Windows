@@ -3,6 +3,7 @@
 import type { BotEmoteName, BotStateName, IslandMode, IslandViewName } from "./layout";
 import type { EyeShape } from "../mochi/engine";
 import type { AgentProfile } from "./agents";
+import type { Project } from "./projects";
 
 export type AgentSource = "ollama" | "n8n";
 export type PillBadge = "finished" | "error";
@@ -44,6 +45,7 @@ export interface SavedChat {
   models?: { ollama: string; browser: string };
   parentId?: string;
   branchMessageId?: number;
+  projectId?: string;
 }
 
 export interface MascotHandoff {
@@ -90,6 +92,8 @@ export interface Settings {
   searchProvider: string;
   searchUrl: string;
   mcpServers: { id: string; name: string; command: string; url: string; args: string[]; env: Record<string,string>; enabled: boolean; permissions: string }[];
+  projects: Project[];
+  activeProjectId: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -120,6 +124,8 @@ export const DEFAULT_SETTINGS: Settings = {
   searchProvider: "duckduckgo",
   searchUrl: "",
   mcpServers: [],
+  projects: [],
+  activeProjectId: "",
 };
 
 type Listener = () => void;
@@ -183,6 +189,7 @@ class AppState {
   chatModels: { ollama: string; browser: string } | null = null;
   chatParentId: string | undefined;
   chatBranchMessageId: number | undefined;
+  chatProjectId: string | undefined;
   streamResponses = true;
   chatBusy = false;
   voiceBusy = false;
@@ -226,7 +233,7 @@ class AppState {
     if (!this.chatHistory.length) return;
     const title = this.chatHistory.find(message => message.role === "user")?.content.slice(0, 80) || "Chat";
     const chat: SavedChat = { id: this.chatId, title, updatedAt: Date.now(), messages: structuredClone(this.chatHistory),
-      models: this.chatModels ? { ...this.chatModels } : undefined, parentId: this.chatParentId, branchMessageId: this.chatBranchMessageId };
+      models: this.chatModels ? { ...this.chatModels } : undefined, parentId: this.chatParentId, branchMessageId: this.chatBranchMessageId, projectId: this.chatProjectId };
     this.savedChats = [chat, ...this.savedChats.filter(item => item.id !== chat.id)];
     try { localStorage.setItem("coucou.chats", JSON.stringify(this.savedChats)); }
     catch { this.chatStatus = "Chat storage is full. This conversation could not be saved."; }
