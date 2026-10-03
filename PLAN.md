@@ -1,6 +1,8 @@
 # CouCou implementation plan
 
-Status: stages 1–18 implementation landed; runtime verification remains partial as recorded below. Stage 19 is next. Preserve the full 20-stage scope and one implementation commit per stage. User requested no further test execution.
+Status: stages 1–19 implementation landed; runtime verification remains partial as recorded below. Stage 20 is next. Preserve the full 20-stage scope and one implementation commit per stage. User requested no further test execution.
+
+Stage 19: model manager lists installed sizes and loaded VRAM, downloads/deletes models, displays model metadata/capabilities/context, loads/unloads models, persists keep-alive/idle-unload preferences, aliases and fallback selection before generation. Multi-step runs now allow 64 tool calls in both backends. Download, delete and inference journeys remain unverified; no tests executed.
 
 Stage 18: statistics view aggregates saved model turns and tool outcomes, captures Ollama token/context counts and generation durations, TPS, frontend-observed first-token latency and turn duration; native refresh reads Windows RAM/GPU counters, Ollama loaded-model VRAM data, local disk and index bytes. Unsupported counters are unavailable rather than invented. No tests executed.
 

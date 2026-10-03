@@ -395,6 +395,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     if (event.requestId !== State.chatRequestId || !State.chatBusy || stopping) return;
     const task = State.tasks.find(task => task.id === "integration_ollama");
     const run=State.runs.find(run=>run.id===event.requestId);
+    if(event.phase==="model" && run)run.model=event.text;
     if(run && !["streaming","metrics","tool-output","tool-call"].includes(event.phase))run.action=event.text;
     if(event.phase==="tool-call") {
       try {const call=JSON.parse(event.text);if(run)run.calls.push({name:call.name,input:call.input});}catch { }

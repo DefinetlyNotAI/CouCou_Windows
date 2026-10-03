@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::{watch, Mutex};
 
-const MAX_TOOL_CALLS: usize = 8;
+const MAX_TOOL_CALLS: usize = 64;
 const SYSTEM_PROMPT: &str = "You are Mochi, a personal assistant living at the top of the user's screen. \
 Respond in the user's language, using Markdown with clear paragraphs. \
 Use only tools provided to you. For current information, search when a web_search tool is available. \
@@ -281,6 +281,7 @@ async fn run_turn<F: Fn(ChatProgress) + Send + Sync>(
         chat.wait_resume().await;
         emit(progress(request_id, "generating", "Generating reply…", None));
         let mut body = json!({"model":settings.ollama_model, "messages":messages, "stream":true, "options":{"num_predict":1024}});
+        body["keep_alive"]=json!(settings.model_keep_alive);
         if let Some(agent) = settings.active_agent() {
             body["options"]["temperature"] = json!(agent["temperature"].as_f64().unwrap_or(0.7).clamp(0.0, 2.0));
             body["options"]["num_ctx"] = json!(agent["contextSize"].as_u64().unwrap_or(4096).clamp(512, 131072));
@@ -313,7 +314,7 @@ async fn run_turn<F: Fn(ChatProgress) + Send + Sync>(
         }
         if calls_used > MAX_TOOL_CALLS {
             return Err(
-                "The model reached the limit of eight tool calls. Try a more focused question."
+                "The model reached the limit of 64 tool calls. Continue in another turn."
                     .into(),
             );
         }

@@ -53,7 +53,7 @@ const ALLOWED_MODELS = new Set([
   "Hermes-2-Pro-Llama-3-8B-q4f16_1-MLC",
 ]);
 const ALLOWED_TOOLS = new Set(["get_current_time", "web_search", "web_fetch"]);
-const MAX_TOOL_CALLS = 8;
+const MAX_TOOL_CALLS = 64;
 const MODEL_INIT_TIMEOUT_MS = 600_000;
 
 let webLLMLoading: Promise<WebLLM> | null = null;
@@ -390,7 +390,7 @@ class BrowserAIClient {
       }
       callsUsed += calls.length;
       if (callsUsed > MAX_TOOL_CALLS) {
-        throw new Error("The browser model reached the limit of eight tool calls. Try a more focused question.");
+        throw new Error("The browser model reached the limit of 64 tool calls. Continue in another turn.");
       }
 
       for (const call of calls) {

@@ -201,6 +201,12 @@ async fn chat_send(
     chat.set_runtime(app.clone(), chat_id.unwrap_or_default(), project_id.clone());
     let mut settings = shared.settings.lock().unwrap().for_project(&project_id);
     if let Some(model) = model { settings.ollama_model = model; }
+    let selected=settings.model_aliases.get(&settings.ollama_model).cloned().unwrap_or_else(||settings.ollama_model.clone());
+    settings.ollama_model=selected;
+    if ollama::model_info(&settings.ollama_url,&settings.ollama_model).await.is_err() {
+        for fallback in &settings.fallback_models {let candidate=settings.model_aliases.get(fallback).unwrap_or(fallback);if ollama::model_info(&settings.ollama_url,candidate).await.is_ok(){settings.ollama_model=candidate.clone();break;}}
+    }
+    let _=app.emit_to(island::WINDOW_LABEL,"chat-progress",serde_json::json!({"requestId":request_id,"phase":"model","text":settings.ollama_model,"tool":null}));
     ollama::send(&chat, &settings, &request_id, query, context, |event| {
         if !matches!(event.phase.as_str(), "streaming" | "thinking") {
             log::line(format!("ollama {} request={} tool={}", event.phase, event.request_id, event.tool.as_deref().unwrap_or("")));
@@ -244,6 +250,23 @@ async fn browser_tool(shared: State<'_, Shared>, name: String, arguments: serde_
 #[tauri::command]
 fn browser_context(context: ChatContext) -> Result<String, String> {
     ollama::browser_context(context)
+}
+
+#[tauri::command]
+async fn model_manage(url:String,action:String,model:String,keep_alive:String)->Result<serde_json::Value,String>{
+    let client=reqwest::Client::builder().timeout(std::time::Duration::from_secs(3600)).build().map_err(|error|error.to_string())?;
+    let base=url.trim_end_matches('/');
+    let request=match action.as_str(){
+        "list"=>client.get(format!("{base}/api/tags")),
+        "loaded"=>client.get(format!("{base}/api/ps")),
+        "show"=>client.post(format!("{base}/api/show")).json(&serde_json::json!({"model":model})),
+        "pull"=>client.post(format!("{base}/api/pull")).json(&serde_json::json!({"model":model,"stream":false})),
+        "delete"=>client.delete(format!("{base}/api/delete")).json(&serde_json::json!({"model":model})),
+        "load"|"unload"=>client.post(format!("{base}/api/generate")).json(&serde_json::json!({"model":model,"stream":false,"keep_alive":if action=="unload" {serde_json::json!(0)}else{serde_json::json!(keep_alive)}})),
+        _=>return Err("Unknown model action".into())};
+    let response=request.send().await.map_err(|error|error.to_string())?.error_for_status().map_err(|error|error.to_string())?;
+    let text=response.text().await.map_err(|error|error.to_string())?;
+    if text.trim().is_empty(){Ok(serde_json::json!({"status":"success"}))}else{serde_json::from_str(&text).map_err(|error|error.to_string())}
 }
 #[tauri::command]
 fn chat_pause(chat:State<'_,Chat>,paused:bool) {chat.pause(paused);}
@@ -434,6 +457,7 @@ pub fn run() {
         .manage(voice::Voice::default())
         .invoke_handler(tauri::generate_handler![
             system_stats,
+            model_manage,
             boot,
             tool_run,
             tool_decision,

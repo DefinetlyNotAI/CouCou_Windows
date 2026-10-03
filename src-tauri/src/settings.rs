@@ -55,6 +55,9 @@ pub struct Settings {
     #[serde(default)] pub projects: Vec<serde_json::Value>,
     #[serde(default)] pub active_project_id: String,
     #[serde(default="default_embedding_model")] pub embedding_model:String,
+    #[serde(default)] pub model_aliases:std::collections::HashMap<String,String>,
+    #[serde(default)] pub fallback_models:Vec<String>,
+    #[serde(default="default_keep_alive")] pub model_keep_alive:String,
 }
 
 fn enabled() -> bool {
@@ -62,6 +65,7 @@ fn enabled() -> bool {
 }
 fn default_search_provider() -> String { "duckduckgo".into() }
 fn default_embedding_model() -> String {"embeddinggemma".into()}
+fn default_keep_alive()->String {"5m".into()}
 fn default_island_width() -> f64 { 640.0 }
 fn default_chat_height() -> f64 { 300.0 }
 fn default_island_position() -> f64 { 0.5 }
@@ -122,6 +126,7 @@ impl Default for Settings {
             projects: Vec::new(),
             active_project_id: String::new(),
             embedding_model:default_embedding_model(),
+            model_aliases:Default::default(),fallback_models:Vec::new(),model_keep_alive:default_keep_alive(),
         }
     }
 }

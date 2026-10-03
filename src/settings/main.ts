@@ -7,6 +7,7 @@ import { h, clear } from "../views/dom";
 import { agentsSection } from "./agents";
 import { mcpSection } from "./mcp";
 import { projectsSection } from "./projects";
+import { modelsSection } from "./models";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
 let version = "";
@@ -578,6 +579,7 @@ async function main() {
     permissionsSection(),
     mcpSection(settings,save),
     projectsSection(settings,save),
+    modelsSection(settings,save),
     integrationsSection(present),
     generalSection(),
   );

@@ -30,6 +30,7 @@ export interface BootInfo {
 }
 
 export const Bridge = {
+  modelManage:(url:string,action:string,model="",keepAlive="5m")=>callOrThrow<Record<string,unknown>>("model_manage",{url,action,model,keepAlive}),
   systemStats:()=>callOrThrow<unknown>("system_stats"),
   backgroundList:()=>callOrThrow<BackgroundTask[]>("background_list"),
   backgroundStop:(id:string)=>callOrThrow<void>("background_stop",{id}),

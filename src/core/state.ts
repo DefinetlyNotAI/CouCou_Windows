@@ -102,6 +102,7 @@ export interface Settings {
   projects: Project[];
   activeProjectId: string;
   embeddingModel: string;
+  modelAliases:Record<string,string>;fallbackModels:string[];modelKeepAlive:string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -135,6 +136,7 @@ export const DEFAULT_SETTINGS: Settings = {
   projects: [],
   activeProjectId: "",
   embeddingModel: "embeddinggemma",
+  modelAliases:{},fallbackModels:[],modelKeepAlive:"5m",
 };
 
 type Listener = () => void;
