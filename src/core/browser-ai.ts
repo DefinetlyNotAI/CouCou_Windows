@@ -17,6 +17,8 @@ export interface BrowserAISettings {
   agentPrompt?: string;
   agentProfile?: string;
   agentProfiles?: AgentProfile[];
+  chatId?: string;
+  projectId?: string;
 }
 
 type WebLLM = typeof import("@mlc-ai/web-llm");
@@ -294,8 +296,7 @@ class BrowserAIClient {
     const supportsFunctionCalling = webllm.functionCallingModelIds.includes(settings.browserModel);
     const profile = settings.agentProfiles?.find(profile => profile.id === settings.agentProfile);
     const tools = settings.toolsEnabled && supportsFunctionCalling
-      ? (await Bridge.browserTools()).filter(isChatTool).filter((tool) =>
-          ALLOWED_TOOLS.has(tool.function.name) &&
+      ? [...await Bridge.browserTools(), ...await Bridge.toolSchemas()].filter(isChatTool).filter((tool) =>
           (!profile?.tools.length || profile.tools.includes(tool.function.name)) &&
           (settings.webSearchEnabled || !tool.function.name.startsWith("web_")),
         )
@@ -380,7 +381,7 @@ class BrowserAIClient {
       for (const call of calls) {
         this.assertActive(active);
         const name = call.function.name;
-        if (!call.id || !ALLOWED_TOOLS.has(name) || !tools.some((tool) => tool.function.name === name)) {
+        if (!call.id || !tools.some((tool) => tool.function.name === name)) {
           throw new Error("The browser model returned an unsupported tool call.");
         }
         let args: unknown;
@@ -394,7 +395,9 @@ class BrowserAIClient {
         }
 
         this.progress(active, "tool-start", `Running ${name}…`, name);
-        const result = await Bridge.browserTool(name, args);
+        const result = ALLOWED_TOOLS.has(name)
+          ? await Bridge.browserTool(name, args)
+          : { content: JSON.stringify(await Bridge.toolRun({ name, input: args, chatId: settings.chatId || "", projectId: settings.projectId })), sources: [] };
         this.assertActive(active);
         for (const source of result.sources) appendSource(sources, source);
         this.progress(active, "tool-result", `${name} completed`, name);

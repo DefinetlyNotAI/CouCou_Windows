@@ -157,7 +157,10 @@ async fn chat_send(
     query: String,
     context: Option<ChatContext>,
     model: Option<String>,
+    chat_id: Option<String>,
+    project_id: Option<String>,
 ) -> Result<ChatReply, String> {
+    chat.set_runtime(app.clone(), chat_id.unwrap_or_default(), project_id.unwrap_or_default());
     let mut settings = shared.settings.lock().unwrap().clone();
     if let Some(model) = model { settings.ollama_model = model; }
     ollama::send(&chat, &settings, &request_id, query, context, |event| {

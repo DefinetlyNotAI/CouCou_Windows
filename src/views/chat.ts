@@ -461,8 +461,8 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
         listening.then(() => {
           if (State.chatRequestId !== requestId || stopping) throw new Error("Reply stopped.");
           return activeBackend === "browser"
-            ? BrowserAI.send(requestId, query, context, settings, handleProgress)
-            : Bridge.chatSend(requestId, query, context, settings.ollamaModel);
+            ? BrowserAI.send(requestId, query, context, { ...settings, chatId: State.chatId }, handleProgress)
+            : Bridge.chatSend(requestId, query, context, settings.ollamaModel, State.chatId);
         }),
         new Promise<never>((_, reject) => {
           const seconds = Math.max(30, Math.min(600, settings.chatTimeoutSeconds)) + (activeBackend === "browser" ? 605 : 5);

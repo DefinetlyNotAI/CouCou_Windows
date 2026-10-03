@@ -90,6 +90,8 @@ pub async fn execute(app: &AppHandle, request: &ToolRequest) -> Result<Value, St
             Ok(json!({"entries":entries}))
         },
         "terminal.run" => {
+            let program_name = PathBuf::from(text(input,"program")?).file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+            if program_name.starts_with("coucou-hooks") { return Err("Hooks are not exposed as arbitrary shell access".into()); }
             let args: Vec<String> = input["args"].as_array().map(|args| args.iter().map(|arg| arg.as_str().map(str::to_string).ok_or("Arguments must be strings".to_string())).collect()).unwrap_or(Ok(Vec::new()))?;
             command(text(input,"program")?, &args, input["cwd"].as_str(), None).await
         },

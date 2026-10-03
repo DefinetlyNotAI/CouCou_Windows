@@ -16,9 +16,13 @@ pub struct Chat {
     messages: Mutex<Vec<Value>>,
     active: std::sync::Mutex<Option<(String, watch::Sender<bool>)>>,
     cancelled_before_start: std::sync::Mutex<Option<String>>,
+    runtime: std::sync::Mutex<Option<(tauri::AppHandle, String, String)>>,
 }
 
 impl Chat {
+    pub fn set_runtime(&self, app: tauri::AppHandle, chat_id: String, project_id: String) {
+        *self.runtime.lock().unwrap() = Some((app, chat_id, project_id));
+    }
     pub fn cancel(&self, request_id: Option<&str>) {
         let active = self.active.lock().unwrap();
         if let Some((id, signal)) = active.as_ref() {
@@ -220,8 +224,10 @@ async fn run_turn<F: Fn(ChatProgress) + Send + Sync>(
     let mut history = chat.messages.lock().await;
     let info = model_info(&settings.ollama_url, &settings.ollama_model).await?;
     let key = if settings.web_search_enabled { secrets::get("ollama-web-key") } else { None };
-    let tools =
+    let runtime = chat.runtime.lock().unwrap().clone();
+    let mut tools =
         if settings.tools_enabled && info.tools { settings.agent_tools(tool_schemas(key.is_some())) } else { Vec::new() };
+    if runtime.is_some() && settings.tools_enabled && info.tools { tools.extend(settings.agent_tools(crate::tools::schemas())); }
     let mut message = json!({ "role": "user", "content": query });
     {
         match context {
@@ -298,7 +304,14 @@ async fn run_turn<F: Fn(ChatProgress) + Send + Sync>(
             let arguments =
                 call.get("function").and_then(|f| f.get("arguments")).cloned().unwrap_or(json!({}));
             emit(progress(request_id, "tool-start", &format!("Running {name}…"), Some(name)));
-            let result = execute_tool(name, &arguments, key.as_deref(), &mut sources).await;
+            let result = if !tools.iter().any(|tool| tool["function"]["name"].as_str() == Some(name)) {
+                Err("Tool is disabled for this agent".into())
+            } else if crate::tools::category(name).is_some() {
+                match &runtime {
+                    Some((app,chat_id,project_id)) => crate::permissions::run(app,&crate::tools::ToolRequest { name: name.into(), input: arguments, chat_id: chat_id.clone(), project_id: project_id.clone() }).await,
+                    None => Err("Tool requires the Windows app".into()),
+                }
+            } else { execute_tool(name, &arguments, key.as_deref(), &mut sources).await };
             let content = match result {
                 Ok(value) => {
                     emit(progress(
