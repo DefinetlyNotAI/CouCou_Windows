@@ -10,8 +10,8 @@ labels: bug
 
 **How to reproduce**
 
-**macOS version**
+**Windows version**
 
-**Mac model**
+**PC model**
 
 **Coucou version**
