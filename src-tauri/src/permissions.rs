@@ -14,7 +14,7 @@ pub fn decide(id: String, decision: String) -> Result<(), String> {
     if !["once","chat","project","always","deny"].contains(&decision.as_str()) { return Err("Invalid permission decision".into()); }
     pending().lock().unwrap().remove(&id).ok_or("Permission request has expired")?.send(decision).map_err(|_| "Permission request has expired".into())
 }
-pub async fn authorize(app: &AppHandle, request: &ToolRequest) -> Result<(), String> {
+pub async fn authorize<R: tauri::Runtime>(app: &AppHandle<R>, request: &ToolRequest) -> Result<(), String> {
     let base_category = crate::tools::category(&request.name).ok_or("Unknown tool")?;
     let script = request.input["script"].as_str().unwrap_or("").to_lowercase();
     let program = request.input["program"].as_str().unwrap_or("").to_lowercase();
@@ -64,4 +64,76 @@ pub async fn authorize(app: &AppHandle, request: &ToolRequest) -> Result<(), Str
 pub async fn run(app: &AppHandle, request: &ToolRequest) -> Result<Value,String> {
     authorize(app,request).await?;
     crate::tools::execute(app,request).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+    use tauri::Listener;
+
+    #[test]
+    fn approval_grants_are_scoped_and_denials_override_grants() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let app = tauri::test::mock_app();
+            app.manage(Shared { settings: Mutex::new(crate::settings::Settings::default()), gate: Arc::new(crate::island::PollGate::new()) });
+            let count = Arc::new(AtomicUsize::new(0));
+            let observed = count.clone();
+            app.listen_any("tool-permission", move |event| {
+                let payload: Value = serde_json::from_str(event.payload()).unwrap();
+                assert_eq!(payload["category"], "read");
+                assert_eq!(payload["request"]["input"]["path"], "C:\\permission-check.txt");
+                observed.fetch_add(1, Ordering::SeqCst);
+                let decision = if payload["request"]["projectId"] == "permission-test-project" { "project" } else { "chat" };
+                decide(payload["id"].as_str().unwrap().into(), decision.into()).unwrap();
+            });
+            let mut request = ToolRequest { name: "filesystem.read".into(), input: json!({"path":"C:\\permission-check.txt"}), chat_id: "permission-test-chat-1".into(), project_id: String::new() };
+            authorize(app.handle(), &request).await.unwrap();
+            authorize(app.handle(), &request).await.unwrap();
+            assert_eq!(count.load(Ordering::SeqCst), 1);
+            request.chat_id = "permission-test-chat-2".into();
+            authorize(app.handle(), &request).await.unwrap();
+            assert_eq!(count.load(Ordering::SeqCst), 2);
+            request.project_id = "permission-test-project".into();
+            request.chat_id = "permission-test-chat-3".into();
+            authorize(app.handle(), &request).await.unwrap();
+            request.chat_id = "permission-test-chat-4".into();
+            authorize(app.handle(), &request).await.unwrap();
+            assert_eq!(count.load(Ordering::SeqCst), 3);
+            app.state::<Shared>().settings.lock().unwrap().tool_permissions.insert("read:filesystem.read".into(), "deny".into());
+            assert_eq!(authorize(app.handle(), &request).await.unwrap_err(), "Tool denied by permission settings");
+            assert_eq!(count.load(Ordering::SeqCst), 3);
+            request.name = "unknown.tool".into();
+            assert_eq!(authorize(app.handle(), &request).await.unwrap_err(), "Unknown tool");
+        });
+    }
+
+    #[test]
+    fn cancelled_approval_expires_and_once_does_not_create_a_grant() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let app = tauri::test::mock_app();
+            app.manage(Shared { settings: Mutex::new(crate::settings::Settings::default()), gate: Arc::new(crate::island::PollGate::new()) });
+            let ids = Arc::new(Mutex::new(Vec::<String>::new()));
+            let observed = ids.clone();
+            let listener = app.listen_any("tool-permission", move |event| {
+                let payload: Value = serde_json::from_str(event.payload()).unwrap();
+                observed.lock().unwrap().push(payload["id"].as_str().unwrap().into());
+            });
+            let request = ToolRequest { name: "filesystem.read".into(), input: json!({"path":"C:\\cancel-check.txt"}), chat_id: "permission-test-cancel".into(), project_id: String::new() };
+            assert!(tokio::time::timeout(std::time::Duration::from_millis(20), authorize(app.handle(), &request)).await.is_err());
+            let expired = ids.lock().unwrap()[0].clone();
+            assert_eq!(decide(expired, "once".into()).unwrap_err(), "Permission request has expired");
+            app.unlisten(listener);
+            let count = Arc::new(AtomicUsize::new(0));
+            let observed = count.clone();
+            app.listen_any("tool-permission", move |event| {
+                let payload: Value = serde_json::from_str(event.payload()).unwrap();
+                observed.fetch_add(1, Ordering::SeqCst);
+                decide(payload["id"].as_str().unwrap().into(), "once".into()).unwrap();
+            });
+            authorize(app.handle(), &request).await.unwrap();
+            authorize(app.handle(), &request).await.unwrap();
+            assert_eq!(count.load(Ordering::SeqCst), 2);
+        });
+    }
 }
