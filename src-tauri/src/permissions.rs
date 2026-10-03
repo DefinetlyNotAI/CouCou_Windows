@@ -21,6 +21,9 @@ pub async fn authorize(app: &AppHandle, request: &ToolRequest) -> Result<(), Str
     let category = if base_category == "run" && (request.input["admin"].as_bool() == Some(true) || script.contains("runas") || program.ends_with("runas.exe") || program == "runas") { "admin" } else { base_category };
     let shared = app.state::<Shared>();
     let settings = shared.settings.lock().unwrap().clone();
+    if settings.active_agent().and_then(|profile| profile["permissions"].get(&request.name)).and_then(Value::as_str) == Some("deny") {
+        return Err("Tool denied by agent profile".into());
+    }
     let key = format!("{category}:{}",request.name);
     let chat_key = format!("chat:{}:{key}",request.chat_id);
     let project_key = format!("project:{}:{key}",request.project_id);

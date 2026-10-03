@@ -25,6 +25,9 @@ pub fn category(name: &str) -> Option<&'static str> {
         "web.open" => "browser",
         "web.search" | "web.fetch" | "web.extract" => "network",
         "http.request" | "github.request" | "vercel.request" => "network",
+        name if name.starts_with("mcp.connect.http.") => "network",
+        name if name.starts_with("mcp.connect.stdio.") => "run",
+        name if name.starts_with("mcp.") => "desktop",
         _ => return None,
     })
 }
@@ -84,6 +87,7 @@ async fn ps(script: &str, input: &Value, cwd: Option<&str>) -> Result<Value, Str
 pub async fn execute(app: &AppHandle, request: &ToolRequest) -> Result<Value, String> {
     let input = &request.input;
     match request.name.as_str() {
+        name if name.starts_with("mcp.") => crate::mcp::call(app,request).await,
         "web.search" | "web.fetch" | "web.open" | "web.extract" => {
             use tauri::Manager;
             let settings = app.state::<crate::Shared>().settings.lock().unwrap().clone();

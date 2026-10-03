@@ -296,7 +296,7 @@ class BrowserAIClient {
     const supportsFunctionCalling = webllm.functionCallingModelIds.includes(settings.browserModel);
     const profile = settings.agentProfiles?.find(profile => profile.id === settings.agentProfile);
     const tools = settings.toolsEnabled && supportsFunctionCalling
-      ? [...await Bridge.browserTools(), ...await Bridge.toolSchemas()].filter(isChatTool).filter((tool) =>
+      ? [...await Bridge.browserTools(), ...await Bridge.toolSchemas(settings.chatId, settings.projectId)].filter(isChatTool).filter((tool) =>
           (!profile?.tools.length || profile.tools.includes(tool.function.name)) &&
           (settings.webSearchEnabled || !/^web[._]/.test(tool.function.name)),
         )

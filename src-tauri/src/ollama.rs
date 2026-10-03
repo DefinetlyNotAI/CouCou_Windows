@@ -229,6 +229,7 @@ async fn run_turn<F: Fn(ChatProgress) + Send + Sync>(
         if settings.tools_enabled && info.tools { settings.agent_tools(tool_schemas(key.is_some())) } else { Vec::new() };
     if runtime.is_some() && settings.tools_enabled && info.tools {
         tools.extend(settings.agent_tools(crate::tools::schemas().into_iter().filter(|tool| settings.web_search_enabled || !tool["function"]["name"].as_str().unwrap_or_default().starts_with("web.")).collect()));
+        if let Some((app,chat_id,project_id)) = &runtime { tools.extend(crate::mcp::schemas(app,settings,chat_id,project_id).await?); }
     }
     let mut message = json!({ "role": "user", "content": query });
     {

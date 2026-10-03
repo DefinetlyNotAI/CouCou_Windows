@@ -1,0 +1,80 @@
+use rmcp::{service::RunningService, RoleClient, ServiceExt, transport::{TokioChildProcess, StreamableHttpClientTransport}};
+use serde::{Deserialize, Serialize};
+use serde_json::{json,Value};
+use std::{collections::HashMap,sync::{Arc,OnceLock}};
+use tauri::{AppHandle,Manager};
+use tokio::sync::Mutex;
+
+#[derive(Clone,Debug,Serialize,Deserialize)]
+#[serde(rename_all="camelCase")]
+pub struct Server {
+    pub id: String,
+    pub name: String,
+    #[serde(default)] pub command: String,
+    #[serde(default)] pub url: String,
+    #[serde(default)] pub args: Vec<String>,
+    #[serde(default)] pub env: HashMap<String,String>,
+    #[serde(default)] pub enabled: bool,
+    #[serde(default="ask")] pub permissions: String,
+}
+fn ask() -> String { "ask".into() }
+type Client = RunningService<RoleClient,()>;
+type Sessions = HashMap<String,(String,Arc<Client>)>;
+static SESSIONS: OnceLock<Mutex<Sessions>> = OnceLock::new();
+fn sessions() -> &'static Mutex<Sessions> { SESSIONS.get_or_init(Default::default) }
+
+async fn connect(app: &AppHandle, server: &Server, chat_id: &str, project_id: &str) -> Result<Arc<Client>,String> {
+    if !server.enabled || server.permissions == "deny" { return Err("MCP server is disabled or denied".into()); }
+    crate::permissions::authorize(app,&crate::tools::ToolRequest {
+        name: format!("mcp.connect.{}.{}",if server.url.is_empty() { "stdio" } else { "http" },server.id),
+        input: json!({"server":server.name,"command":server.command,"url":server.url,"args":server.args,"environmentVariables":server.env.keys().collect::<Vec<_>>() }),
+        chat_id:chat_id.into(),project_id:project_id.into(),
+    }).await?;
+    let fingerprint = serde_json::to_string(server).map_err(|error| error.to_string())?;
+    let mut sessions = sessions().lock().await;
+    if let Some((config,client)) = sessions.get(&server.id) { if config == &fingerprint && !client.is_closed() { return Ok(client.clone()); } }
+    sessions.remove(&server.id);
+    let client = if server.url.is_empty() {
+        use std::os::windows::process::CommandExt;
+        let mut command = tokio::process::Command::new(&server.command);
+        command.args(&server.args).envs(&server.env).kill_on_drop(true);
+        command.as_std_mut().creation_flags(0x08000000);
+        let transport = TokioChildProcess::new(command).map_err(|error| error.to_string())?;
+        tokio::time::timeout(std::time::Duration::from_secs(30),().serve(transport)).await.map_err(|_| "MCP initialization timed out")?.map_err(|error| error.to_string())?
+    } else {
+        let url = reqwest::Url::parse(&server.url).map_err(|error| error.to_string())?;
+        if !matches!(url.scheme(),"http"|"https") { return Err("MCP URL must use HTTP".into()); }
+        let transport = StreamableHttpClientTransport::from_uri(server.url.clone());
+        tokio::time::timeout(std::time::Duration::from_secs(30),().serve(transport)).await.map_err(|_| "MCP initialization timed out")?.map_err(|error| error.to_string())?
+    };
+    let client = Arc::new(client); sessions.insert(server.id.clone(),(fingerprint,client.clone())); Ok(client)
+}
+
+pub async fn schemas(app: &AppHandle, settings: &crate::settings::Settings, chat_id: &str, project_id: &str) -> Result<Vec<Value>,String> {
+    let mut tools = Vec::new();
+    let allowed = settings.active_agent().and_then(|profile| profile["mcpServers"].as_array());
+    for server in &settings.mcp_servers {
+        if !server.enabled || server.permissions == "deny" || allowed.is_some_and(|ids| !ids.is_empty() && !ids.iter().any(|id| id.as_str() == Some(&server.id))) { continue; }
+        let client = connect(app,server,chat_id,project_id).await?;
+        let list = tokio::time::timeout(std::time::Duration::from_secs(30),client.peer().list_all_tools()).await.map_err(|_| "MCP tools/list timed out")?.map_err(|error| error.to_string())?;
+        for tool in list {
+            tools.push(json!({"type":"function","function":{"name":format!("mcp.{}.{}",server.id,tool.name),"description":format!("{}: {}",server.name,tool.description.as_deref().unwrap_or("MCP tool")),"parameters":tool.input_schema}}));
+        }
+    }
+    Ok(settings.agent_tools(tools))
+}
+
+pub async fn call(app: &AppHandle, request: &crate::tools::ToolRequest) -> Result<Value,String> {
+    let mut parts = request.name.splitn(3,'.'); parts.next();
+    let server_id = parts.next().ok_or("Missing MCP server")?;
+    let tool = parts.next().ok_or("Missing MCP tool")?;
+    let settings = app.state::<crate::Shared>().settings.lock().unwrap().clone();
+    if settings.active_agent().and_then(|profile| profile["mcpServers"].as_array()).is_some_and(|ids| !ids.is_empty() && !ids.iter().any(|id| id.as_str() == Some(server_id))) { return Err("MCP server disabled for this agent".into()); }
+    let server = settings.mcp_servers.iter().find(|server| server.id == server_id).ok_or("Unknown MCP server")?;
+    let client = connect(app,server,&request.chat_id,&request.project_id).await?;
+    let available = client.peer().list_all_tools().await.map_err(|error| error.to_string())?;
+    if !available.iter().any(|candidate| candidate.name == tool) { return Err("Unknown MCP tool".into()); }
+    let params = serde_json::from_value(json!({"name":tool,"arguments":request.input})).map_err(|error| error.to_string())?;
+    let result = tokio::time::timeout(std::time::Duration::from_secs(120),client.call_tool(params)).await.map_err(|_| "MCP tool timed out")?.map_err(|error| error.to_string())?;
+    serde_json::to_value(result).map_err(|error| error.to_string())
+}

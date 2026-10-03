@@ -5,6 +5,7 @@ mod voice;
 mod desktop;
 mod tools;
 mod web;
+mod mcp;
 mod permissions;
 mod files;
 mod island;
@@ -32,9 +33,11 @@ async fn tool_run(app: AppHandle, request: tools::ToolRequest) -> Result<serde_j
 #[tauri::command]
 fn tool_decision(id: String, decision: String) -> Result<(),String> { permissions::decide(id,decision) }
 #[tauri::command]
-fn tool_schemas(shared: State<'_, Shared>) -> Vec<serde_json::Value> {
-    let settings = shared.settings.lock().unwrap();
-    settings.agent_tools(tools::schemas().into_iter().filter(|tool| settings.web_search_enabled || !tool["function"]["name"].as_str().unwrap_or_default().starts_with("web.")).collect())
+async fn tool_schemas(app: AppHandle, shared: State<'_, Shared>, chat_id: Option<String>, project_id: Option<String>) -> Result<Vec<serde_json::Value>,String> {
+    let settings = shared.settings.lock().unwrap().clone();
+    let mut tools = settings.agent_tools(tools::schemas().into_iter().filter(|tool| settings.web_search_enabled || !tool["function"]["name"].as_str().unwrap_or_default().starts_with("web.")).collect());
+    tools.extend(mcp::schemas(&app,&settings,&chat_id.unwrap_or_default(),&project_id.unwrap_or_default()).await?);
+    Ok(tools)
 }
 
 pub struct Shared {

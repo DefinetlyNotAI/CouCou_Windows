@@ -5,6 +5,7 @@ import { Bridge, onEvent } from "../core/bridge";
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
 import { h, clear } from "../views/dom";
 import { agentsSection } from "./agents";
+import { mcpSection } from "./mcp";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
 let version = "";
@@ -574,6 +575,7 @@ async function main() {
     chatOptionsSection(keyPresent, keyCheckError),
     agentsSection(settings, save),
     permissionsSection(),
+    mcpSection(settings,save),
     integrationsSection(present),
     generalSection(),
   );

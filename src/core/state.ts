@@ -89,6 +89,7 @@ export interface Settings {
   toolPermissions: Record<string, string>;
   searchProvider: string;
   searchUrl: string;
+  mcpServers: { id: string; name: string; command: string; url: string; args: string[]; env: Record<string,string>; enabled: boolean; permissions: string }[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -118,6 +119,7 @@ export const DEFAULT_SETTINGS: Settings = {
   toolPermissions: {},
   searchProvider: "duckduckgo",
   searchUrl: "",
+  mcpServers: [],
 };
 
 type Listener = () => void;

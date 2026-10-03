@@ -1,6 +1,6 @@
 # CouCou implementation plan
 
-Status: stages 1–8 implementation landed; runtime verification remains partial as recorded below. Stage 9 is next. Preserve the full 20-stage scope and one implementation commit per stage. User requested no further test execution; use compilation and diff inspection only for subsequent stages.
+Status: stages 1–9 implementation landed; runtime verification remains partial as recorded below. Stage 10 is next. Preserve the full 20-stage scope and one implementation commit per stage. User requested no further test execution; use compilation and diff inspection only for subsequent stages.
 
 Stage 1 changes implemented so far: sanitized Markdown, scroll-position preservation during generation, removable attachments, uploads without chat reset, attachment context on later turns, removal of the 200 KB text cap, compact service mascots, chat-only TPS, 0–100% audio volume, exact island bounds for drag entry, native file picker, running-app picker, mascot hover-animation wake-up, and locally saved chats that reopen from recent activity with conversation text restored to either backend.
 
@@ -28,7 +28,9 @@ Stage 7: native Ollama advertises supported Coucou tools and calls the shared pe
 
 Stage 8: permission-gated keyless web.search/fetch/open/extract, DuckDuckGo HTML result parsing, SearXNG/custom JSON endpoints and browser search opening. Results return titles/URLs/text, page extraction and links. Search challenges report errors. Browser mode opens results but cannot yet return browser DOM to the model; complete browser-backed retrieval remains a gap. Frontend/native compilation passed; no tests executed.
 
-Stages 9–20 remain pending. Runtime checks listed above remain part of the full-goal verification scope; implementation commits do not claim those checks passed. The existing release installer predates these changes and needs rebuilding before delivery.
+Stage 9: editable MCP command/HTTP servers, args/env/enabled/permissions, import/export configurations, official Rust SDK stdio and Streamable HTTP clients, real tools/list/tools/call, scoped connection/tool approvals and model tool discovery. Enabled server/agent restrictions apply. Frontend/native compilation passed; no tests executed. Server runtime journeys remain unverified.
+
+Stages 10–20 remain pending. Runtime checks listed above remain part of the full-goal verification scope; implementation commits do not claim those checks passed. The existing release installer predates these changes and needs rebuilding before delivery.
 
 ---
 

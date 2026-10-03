@@ -51,6 +51,7 @@ pub struct Settings {
     pub search_provider: String,
     #[serde(default)]
     pub search_url: String,
+    #[serde(default)] pub mcp_servers: Vec<crate::mcp::Server>,
 }
 
 fn enabled() -> bool {
@@ -113,6 +114,7 @@ impl Default for Settings {
             tool_permissions: Default::default(),
             search_provider: default_search_provider(),
             search_url: String::new(),
+            mcp_servers: Vec::new(),
         }
     }
 }
