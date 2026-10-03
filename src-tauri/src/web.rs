@@ -77,3 +77,27 @@ pub async fn run(settings: &Settings, name: &str, input: &Value) -> Result<Value
     }).take(30).collect();
     Ok(json!({"title":title,"url":final_url.as_str(),"content":content.chars().take(16000).collect::<String>(),"links":links}))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "Requires internet access to public web endpoints"]
+    fn live_keyless_web_fetch_and_search() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let settings = Settings::default();
+            let page = run(&settings, "web.fetch", &json!({"url":"https://example.com"})).await.unwrap();
+            assert!(page["title"].as_str().unwrap_or_default().contains("Example Domain"));
+            assert!(!page["content"].as_str().unwrap_or_default().is_empty());
+            println!("Keyless page retrieval passed: {}", page["url"]);
+            let results = run(&settings, "web.search", &json!({"query":"Ollama official documentation"})).await.unwrap();
+            assert!(!results["results"].as_array().unwrap().is_empty());
+            for entry in results["results"].as_array().unwrap() {
+                assert!(!entry["title"].as_str().unwrap_or_default().is_empty());
+                url(entry["url"].as_str().unwrap()).unwrap();
+            }
+            println!("Keyless search passed: {} results", results["results"].as_array().unwrap().len());
+        });
+    }
+}

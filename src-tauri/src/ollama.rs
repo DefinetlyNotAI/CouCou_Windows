@@ -921,7 +921,7 @@ mod tests {
             assert!(events.lock().unwrap().iter().any(|event| event.phase == "streaming"));
             assert!(events.lock().unwrap().iter().any(|event| event.phase == "metrics" && event.text.parse::<f64>().is_ok_and(|speed| speed > 0.0)));
             if !model.starts_with("gemma") {
-                assert!(events.lock().unwrap().iter().any(|event| event.phase == "tool-start"));
+                assert!(events.lock().unwrap().iter().any(|event| event.phase == "tool-start"), "{model} returned text without calling the requested tool: {}", reply.text);
             }
             println!("Live {model}: {}", reply.text);
         });
