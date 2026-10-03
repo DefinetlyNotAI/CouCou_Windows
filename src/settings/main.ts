@@ -8,6 +8,7 @@ import { agentsSection } from "./agents";
 import { mcpSection } from "./mcp";
 import { projectsSection } from "./projects";
 import { modelsSection } from "./models";
+import { preferenceProfiles } from "./profiles";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
 let version = "";
@@ -343,7 +344,7 @@ function chatOptionsSection(keyPresent: boolean, keyCheckError: string): HTMLEle
     h("div", { class: "row" }, h("label", { text: "Tool calling" }), tools),
     h("div", { class: "row" }, h("label", { text: "Web search" }), webSearch),
     h("div", { class: "row" }, h("label", { text: "Search provider" }), provider),
-    h("div", { class: "row" }, h("label", { text: "SearXNG / custom URL" }), searchUrl),
+    h("div", { class: "row" }, h("label", { text: "Search URL / local browser debugging URL" }), searchUrl),
     h("div", { class: "row" }, h("label", { text: "Request timeout" }), timeout, h("span", { class: "hint", text: "seconds (30–600)" })),
     webSearchKeyControls(keyPresent, keyCheckError),
   );
@@ -580,6 +581,7 @@ async function main() {
     mcpSection(settings,save),
     projectsSection(settings,save),
     modelsSection(settings,save),
+    preferenceProfiles(settings,save),
     integrationsSection(present),
     generalSection(),
   );

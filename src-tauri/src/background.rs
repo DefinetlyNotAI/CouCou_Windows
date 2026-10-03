@@ -11,7 +11,7 @@ fn emit(app:&AppHandle,id:&str,status:Option<&str>,line:Option<String>) {
     if let Some(task)=tasks.get_mut(id) {if let Some(status)=status {task.status=status.into();}if let Some(line)=line {task.logs.push(line);let remove=task.logs.len().saturating_sub(500);task.logs.drain(..remove);}
         let _=app.emit_to(crate::island::WINDOW_LABEL,"background-task",task.clone());
         let scheduled:Vec<_>=tasks.values().filter(|task|task.kind=="schedule").cloned().collect();
-        if let Ok(bytes)=serde_json::to_vec(&scheduled){let _=std::fs::write(path(),bytes);}
+        if let Ok(bytes)=serde_json::to_vec(&scheduled){let _=crate::storage::write(&path(),&bytes);}
     }
 }
 pub fn list(app:&AppHandle)->Vec<Task> {app.state::<Background>().tasks.lock().unwrap().values().cloned().collect()}
@@ -90,4 +90,4 @@ async fn work(app:&AppHandle,task:&Task,mut signal:watch::Receiver<bool>)->Resul
         tokio::select! {_=signal.changed()=>return Err("Task stopped".into()),_=tokio::time::sleep(std::time::Duration::from_secs(2))=>()}
     }
 }
-pub fn restore(app:AppHandle) {if let Ok(bytes)=std::fs::read(path()){if let Ok(tasks)=serde_json::from_slice::<Vec<Task>>(&bytes){for task in tasks {if task.status!="stopped" {let _=start(app.clone(),task);}}}}}
+pub fn restore(app:AppHandle) {if let Ok(bytes)=crate::storage::read(&path()){if let Ok(tasks)=serde_json::from_slice::<Vec<Task>>(&bytes){for task in tasks {if task.status!="stopped" {let _=start(app.clone(),task);}}}}}

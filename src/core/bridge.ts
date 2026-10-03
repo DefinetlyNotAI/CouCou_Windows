@@ -30,6 +30,8 @@ export interface BootInfo {
 }
 
 export const Bridge = {
+  chatsLoad:()=>callOrThrow<string>("chats_load"),
+  chatsSave:(value:string)=>callOrThrow<void>("chats_save",{value}),
   modelManage:(url:string,action:string,model="",keepAlive="5m")=>callOrThrow<Record<string,unknown>>("model_manage",{url,action,model,keepAlive}),
   systemStats:()=>callOrThrow<unknown>("system_stats"),
   backgroundList:()=>callOrThrow<BackgroundTask[]>("background_list"),

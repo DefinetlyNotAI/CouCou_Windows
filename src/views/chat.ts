@@ -36,6 +36,7 @@ export async function reopenChat(id: string): Promise<boolean> {
     await restoreConversation(chat.messages);
     State.saveChat();
     State.chatId = chat.id;
+    State.temporaryChat=false;
     State.chatHistory = chat.messages.map(message => ({ ...message }));
     State.chatModels = chat.models ? { ...chat.models } : null;
     State.chatParentId = chat.parentId;
@@ -99,7 +100,6 @@ function bubble(message: ChatMessage, sources: ChatSource[] = [],openFile?:(path
 }
 
 export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: string) => void,toggleFullscreen:()=>void): ViewHost {
-  State.loadChats();
   const chipRow = h("div", { class: "chip-row" });
   const log = h("div", { class: "chat-log", "aria-live": "polite" });
   const status = h("div", { class: "chat-status", role: "status" });
@@ -241,6 +241,25 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     State.notify();
   });
   quickMenu.append(projectPicker,indexProject,searchProject,searchWeb, screenshot, pasteClipboard, copyReply, streamMode, continueReply);
+  const commands:[string,()=>void][]=[
+    ["New chat",()=>reset.click()],["Stop generation",stop],["Continue reply",()=>continueReply.click()],
+    ["Fullscreen",toggleFullscreen],["Settings",()=>void Bridge.openSettingsWindow()],
+    ["Upload file",()=>upload.click()],["Screenshot",()=>screenshot.click()],["Paste clipboard",()=>pasteClipboard.click()],
+    ["Search web",()=>searchWeb.click()],["Index project",()=>indexProject.click()],
+    ["Temporary chat",()=>{if(State.chatHistory.length){State.chatStatus="Start a new chat before enabling temporary mode.";}else{State.temporaryChat=!State.temporaryChat;State.chatStatus=State.temporaryChat ? "Temporary chat; saving disabled." : "Saving enabled.";}State.notify();}],
+  ];
+  const palette=h("div",{class:"chat-command-palette",hidden:true});
+  const commandQuery=h("input",{placeholder:"Search commands…","aria-label":"Search commands"}) as HTMLInputElement;
+  const commandList=h("div");palette.append(commandQuery,commandList);toolbar.after(palette);
+  function renderCommands(){commandList.replaceChildren(...commands.filter(([label])=>label.toLowerCase().includes(commandQuery.value.toLowerCase())).map(([label,action])=>h("button",{class:"link-btn",text:label,onclick:()=>{palette.hidden=true;action();}})));}
+  function showCommands(){palette.hidden=!palette.hidden;commandQuery.value="";renderCommands();if(!palette.hidden)commandQuery.focus();}
+  commandQuery.addEventListener("input",renderCommands);commandQuery.addEventListener("keydown",event=>{if((event as KeyboardEvent).key==="Escape"){palette.hidden=true;input.focus();event.stopPropagation();}});
+  quickMenu.append(h("button",{class:"link-btn",text:"Commands · Ctrl+K",onclick:showCommands}));
+  document.addEventListener("keydown",event=>{
+    if(event.ctrlKey && event.key.toLowerCase()==="k"){event.preventDefault();event.stopPropagation();showCommands();}
+    if(event.ctrlKey && event.shiftKey && event.key.toLowerCase()==="n"){event.preventDefault();reset.click();}
+    if(event.ctrlKey && event.key==="."){event.preventDefault();stop();}
+  },true);
   const workspace=buildWorkspace(el,contextInspector.el,activity,projectPicker,paused=>void pauseRun(paused),stop);
   async function pauseRun(paused:boolean) {
     const id=State.chatRequestId;if(!id)return;
@@ -630,14 +649,15 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     resetting = true;
     State.promptQueue = [];
     State.toolActivity = [];
-    State.toolResults=[];
-    State.runs=[];
     if (State.chatBusy) stop();
     await turnFinished;
     await Bridge.chatReset();
     await BrowserAI.reset();
     State.saveChat();
+    State.toolResults=[];
+    State.runs=[];
     State.chatId = crypto.randomUUID();
+    State.temporaryChat=false;
     State.chatModels = null;
     State.chatParentId = undefined; State.chatBranchMessageId = undefined;
     State.chatProjectId=State.settings.activeProjectId;
@@ -653,6 +673,8 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     onHeightChange();
   });
   function startSubmit() {
+    const slash=/^\/(new|stop|continue|fullscreen|settings|temp|search|screenshot|clipboard|upload)(?:\s+(.*))?$/s.exec(input.value.trim());
+    if(slash){input.value=slash[2]||"";const labels:Record<string,string>={new:"New chat",stop:"Stop generation",continue:"Continue reply",fullscreen:"Fullscreen",settings:"Settings",temp:"Temporary chat",search:"Search web",screenshot:"Screenshot",clipboard:"Paste clipboard",upload:"Upload file"};commands.find(([label])=>label===labels[slash[1]])?.[1]();return;}
     if (desktopBusy && !State.chatBusy) return;
     if (voiceMode || callActive) stopVoice();
     if (State.chatBusy) { stop(); return; }

@@ -13,6 +13,8 @@ async function main() {
 
   void Sound.preload();
 
+  await State.loadChats();
+
   const island = new Island(root);
 
   const boot = await Bridge.boot();

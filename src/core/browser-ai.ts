@@ -363,6 +363,7 @@ class BrowserAIClient {
       if (usage && Number.isFinite(usage.extra?.decode_tokens_per_s)) {
         this.progress(active, "metrics", usage.extra.decode_tokens_per_s.toFixed(1));
       }
+      if(usage)this.progress(active,"usage",JSON.stringify({prompt_eval_count:usage.prompt_tokens,eval_count:usage.completion_tokens,eval_duration:usage.extra?.decode_tokens_per_s ? usage.completion_tokens/usage.extra.decode_tokens_per_s*1e9 : null}));
 
       const calls: ToolCall[] = [...pendingCalls.entries()]
         .sort(([left], [right]) => left - right)

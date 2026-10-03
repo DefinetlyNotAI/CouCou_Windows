@@ -1,0 +1,7 @@
+import {h} from "../views/dom";
+import type {Settings} from "../core/state";
+export function preferenceProfiles(settings:Settings,save:()=>Promise<void>){
+  const el=h("section",{},h("h2",{text:"Preference profiles"}));const select=h("select",{"aria-label":"Preference profile"}) as HTMLSelectElement;const name=h("input",{placeholder:"Profile name","aria-label":"Profile name"}) as HTMLInputElement;const status=h("div",{role:"status"});
+  function render(){select.replaceChildren(...settings.preferenceProfiles.map(profile=>h("option",{value:profile.id,text:profile.name})));}render();
+  el.append(select,name,h("button",{text:"Save current as profile",onclick:async()=>{if(!name.value.trim())return;const snapshot={...settings,preferenceProfiles:[]};settings.preferenceProfiles.push({id:crypto.randomUUID(),name:name.value.trim(),settings:structuredClone(snapshot)});await save();render();status.textContent="Profile saved";}}),h("button",{text:"Apply",onclick:async()=>{const profile=settings.preferenceProfiles.find(profile=>profile.id===select.value);if(!profile)return;const profiles=settings.preferenceProfiles;Object.assign(settings,structuredClone(profile.settings));settings.preferenceProfiles=profiles;await save();status.textContent="Applied. Reopen Settings to refresh its controls.";}}),h("button",{text:"Delete",onclick:async()=>{settings.preferenceProfiles=settings.preferenceProfiles.filter(profile=>profile.id!==select.value);await save();render();}}),status);return el;
+}

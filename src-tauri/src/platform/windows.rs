@@ -31,6 +31,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// %APPDATA%\Coucou — preferences.
 pub fn config_dir() -> PathBuf {
+    if let Some(path)=portable_dir(){return path;}
     let base = std::env::var_os("APPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
@@ -39,11 +40,14 @@ pub fn config_dir() -> PathBuf {
 
 /// %LOCALAPPDATA%\Coucou — the inbox and the log.
 pub fn local_dir() -> PathBuf {
+    if let Some(path)=portable_dir(){return path;}
     let base = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     base.join("Coucou")
 }
+
+fn portable_dir()->Option<PathBuf>{let exe=std::env::current_exe().ok()?;let folder=exe.parent()?;if std::env::var_os("COUCOU_PORTABLE").is_some()||folder.join("portable.flag").exists(){Some(folder.join("data"))}else{None}}
 
 /// %APPDATA% and %LOCALAPPDATA% are already private to the user.
 pub fn ensure_private_dir(dir: &std::path::Path) -> std::io::Result<()> {

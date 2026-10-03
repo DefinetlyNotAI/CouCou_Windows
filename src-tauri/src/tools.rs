@@ -95,7 +95,7 @@ async fn command(program: &str, args: &[String], cwd: Option<&str>, stdin: Optio
 fn powershell() -> String {
     format!("{}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into()))
 }
-async fn ps(script: &str, input: &Value, cwd: Option<&str>) -> Result<Value, String> {
+pub(crate) async fn ps(script: &str, input: &Value, cwd: Option<&str>) -> Result<Value, String> {
     command(&powershell(), &["-NoLogo".into(),"-NoProfile".into(),"-NonInteractive".into(),"-STA".into(),"-Command".into(),script.into()], cwd, Some(&input.to_string())).await
 }
 

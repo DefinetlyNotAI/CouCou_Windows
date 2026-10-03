@@ -5,6 +5,7 @@ import type { EyeShape } from "../mochi/engine";
 import type { AgentProfile } from "./agents";
 import type { Project } from "./projects";
 import type { AgentRun } from "./runs";
+import {Bridge,IS_TAURI} from "./bridge";
 
 export type AgentSource = "ollama" | "n8n" | "local";
 export type PillBadge = "finished" | "error";
@@ -53,6 +54,7 @@ export interface SavedChat {
   projectId?: string;
   toolResults?: { tool:string; content:string }[];
   runs?:AgentRun[];
+  folder?:string;tags?:string[];
 }
 
 export interface MascotHandoff {
@@ -103,6 +105,7 @@ export interface Settings {
   activeProjectId: string;
   embeddingModel: string;
   modelAliases:Record<string,string>;fallbackModels:string[];modelKeepAlive:string;
+  preferenceProfiles:{id:string;name:string;settings:Partial<Settings>}[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -137,6 +140,7 @@ export const DEFAULT_SETTINGS: Settings = {
   activeProjectId: "",
   embeddingModel: "embeddinggemma",
   modelAliases:{},fallbackModels:[],modelKeepAlive:"5m",
+  preferenceProfiles:[],
 };
 
 type Listener = () => void;
@@ -197,6 +201,9 @@ class AppState {
   chatHistory: ChatMessage[] = [];
   chatId: string = crypto.randomUUID();
   savedChats: SavedChat[] = [];
+  temporaryChat=false;
+  private chatsLoaded=false;
+  private chatWrites:Promise<void>=Promise.resolve();
   chatModels: { ollama: string; browser: string } | null = null;
   chatParentId: string | undefined;
   chatBranchMessageId: number | undefined;
@@ -232,24 +239,35 @@ class AppState {
     for (const fn of this.listeners) fn();
   }
 
-  loadChats() {
+  async loadChats() {
+    if(this.chatsLoaded)return;this.chatsLoaded=true;
     try {
-      const value: unknown = JSON.parse(localStorage.getItem("coucou.chats") || "[]");
+      let data=IS_TAURI ? await Bridge.chatsLoad() : localStorage.getItem("coucou.chats")||"[]";
+      const legacy=localStorage.getItem("coucou.chats");
+      if(IS_TAURI && data==="[]" && legacy){await Bridge.chatsSave(legacy);data=legacy;}
+      if(IS_TAURI)localStorage.removeItem("coucou.chats");
+      const value: unknown = JSON.parse(data);
       if (Array.isArray(value)) this.savedChats = value.filter((chat): chat is SavedChat =>
         chat && typeof chat.id === "string" && typeof chat.title === "string" && typeof chat.updatedAt === "number" &&
         Array.isArray(chat.messages) && chat.messages.every((message: ChatMessage) =>
           typeof message.id === "number" && (message.role === "user" || message.role === "assistant") && typeof message.content === "string"));
-    } catch { this.savedChats = []; }
+      this.notify();
+    } catch(error) { this.chatStatus=`Could not load chats: ${String(error)}`;this.chatsLoaded=false;this.notify(); }
+  }
+
+  persistChats() {
+    const value=JSON.stringify(this.savedChats);
+    if(IS_TAURI)this.chatWrites=this.chatWrites.then(()=>Bridge.chatsSave(value)).catch(error=>{this.chatStatus=`Chat save failed: ${String(error)}`;this.notify();});
+    else {try {localStorage.setItem("coucou.chats",value);}catch{this.chatStatus="Chat storage is full.";}}
   }
 
   saveChat() {
-    if (!this.chatHistory.length) return;
+    if (!this.chatHistory.length || this.temporaryChat) return;
     const title = this.chatHistory.find(message => message.role === "user")?.content.slice(0, 80) || "Chat";
     const chat: SavedChat = { id: this.chatId, title, updatedAt: Date.now(), messages: structuredClone(this.chatHistory),
-      models: this.chatModels ? { ...this.chatModels } : undefined, parentId: this.chatParentId, branchMessageId: this.chatBranchMessageId, projectId: this.chatProjectId, toolResults: structuredClone(this.toolResults),runs:structuredClone(this.runs) };
+      models: this.chatModels ? { ...this.chatModels } : undefined, parentId: this.chatParentId, branchMessageId: this.chatBranchMessageId, projectId: this.chatProjectId, toolResults: structuredClone(this.toolResults),runs:structuredClone(this.runs),folder:this.savedChats.find(chat=>chat.id===this.chatId)?.folder,tags:this.savedChats.find(chat=>chat.id===this.chatId)?.tags };
     this.savedChats = [chat, ...this.savedChats.filter(item => item.id !== chat.id)];
-    try { localStorage.setItem("coucou.chats", JSON.stringify(this.savedChats)); }
-    catch { this.chatStatus = "Chat storage is full. This conversation could not be saved."; }
+    this.persistChats();
   }
 
   branchChat(messageId: number, messages: ChatMessage[]) {

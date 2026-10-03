@@ -9,6 +9,7 @@ mod mcp;
 mod index;
 mod services;
 mod background;
+mod storage;
 mod permissions;
 mod files;
 mod island;
@@ -37,6 +38,8 @@ async fn tool_run(app: AppHandle, request: tools::ToolRequest) -> Result<serde_j
 fn tool_decision(id: String, decision: String) -> Result<(),String> { permissions::decide(id,decision) }
 #[tauri::command]fn background_list(app:AppHandle)->Vec<background::Task>{background::list(&app)}
 #[tauri::command]fn background_stop(app:AppHandle,id:String)->Result<(),String>{background::stop(&app,&id)}
+#[tauri::command]fn chats_load()->Result<String,String>{match storage::read(&platform::local_dir().join("chats.json")){Ok(bytes)=>String::from_utf8(bytes).map_err(|error|error.to_string()),Err(error) if error.kind()==std::io::ErrorKind::NotFound=>Ok("[]".into()),Err(error)=>Err(error.to_string())}}
+#[tauri::command]fn chats_save(value:String)->Result<(),String>{let parsed:serde_json::Value=serde_json::from_str(&value).map_err(|error|error.to_string())?;if !parsed.is_array(){return Err("Chats must be an array".into());}storage::write(&platform::local_dir().join("chats.json"),value.as_bytes()).map_err(|error|error.to_string())}
 #[tauri::command]
 async fn system_stats(app:AppHandle)->Result<serde_json::Value,String>{
     let script=r#"$os=Get-CimInstance Win32_OperatingSystem; $gpu=$null; try {$gpu=(Get-Counter '\GPU Engine(*)\Utilization Percentage' -ErrorAction Stop).CounterSamples | Measure-Object CookedValue -Sum | Select-Object -ExpandProperty Sum} catch {}; @{ramTotalBytes=[double]$os.TotalVisibleMemorySize*1024;ramUsedBytes=([double]$os.TotalVisibleMemorySize-[double]$os.FreePhysicalMemory)*1024;gpuEnginePercentSum=$gpu} | ConvertTo-Json -Compress"#;
@@ -458,6 +461,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             system_stats,
             model_manage,
+            chats_load,chats_save,
             boot,
             tool_run,
             tool_decision,

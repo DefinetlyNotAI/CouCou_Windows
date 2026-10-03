@@ -1550,3 +1550,7 @@ input[type="range"]::-webkit-slider-thumb {
 .run-view pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .run-view select { max-width: 100%; background: var(--tab-on); color: var(--dim); border: 0; font: 11px var(--font); }
 @media(max-width:900px) { .full-workspace.view.on { grid-template-columns: 150px minmax(220px,1fr) 190px; gap: 8px; } }
+ .chat-command-palette { padding:8px 12px; border-bottom:1px solid rgba(255,255,255,.1); }
+ .chat-command-palette[hidden] { display:none; }
+ .chat-command-palette input { width:100%; }
+ .chat-command-palette > div { display:flex;flex-wrap:wrap;gap:6px;max-height:100px;overflow:auto; }

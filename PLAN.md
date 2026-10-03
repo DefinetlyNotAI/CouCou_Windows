@@ -1,6 +1,8 @@
 # CouCou implementation plan
 
-Status: stages 1–19 implementation landed; runtime verification remains partial as recorded below. Stage 20 is next. Preserve the full 20-stage scope and one implementation commit per stage. User requested no further test execution.
+Status: implementation commits landed for all 20 stages. Runtime verification remains partial as recorded below; do not infer runtime completion from compilation. User requested no further test execution.
+
+Stage 20: Ctrl+K command palette, slash commands, shortcuts, temporary chats, folder/tag organization, full chat search, merge import/export, password-encrypted AES-GCM backups, preference profiles, DPAPI-encrypted native preferences/chats/indexes/schedules/attachments, legacy chat migration and portable data directory. Browser-backed search now reads a new tab through the user's configured local Chromium debugging endpoint. Frontend production build and native compilation passed; no tests or browser/service journeys executed. Installer packaging follows this commit. DPAPI data remains tied to its Windows account; portable transfers use password-encrypted backups. Browser-only development storage is not DPAPI protected.
 
 Stage 19: model manager lists installed sizes and loaded VRAM, downloads/deletes models, displays model metadata/capabilities/context, loads/unloads models, persists keep-alive/idle-unload preferences, aliases and fallback selection before generation. Multi-step runs now allow 64 tool calls in both backends. Download, delete and inference journeys remain unverified; no tests executed.
 

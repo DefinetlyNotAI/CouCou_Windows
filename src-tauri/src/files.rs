@@ -49,7 +49,8 @@ pub fn ingest(source: &str) -> Result<DroppedFile, String> {
         }
     }
 
-    std::fs::copy(src, &dest).map_err(|e| format!("cannot copy: {e}"))?;
+    let bytes=crate::storage::read(src).map_err(|e|format!("cannot read attachment: {e}"))?;
+    crate::storage::write(&dest,&bytes).map_err(|e|format!("cannot store attachment: {e}"))?;
     // CopyFileEx carries the source's timestamps across, so a file last edited
     // three years ago would arrive already older than the sweep window and be
     // deleted on the spot. The inbox ages from when *we* copied it.

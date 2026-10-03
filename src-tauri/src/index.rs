@@ -58,7 +58,7 @@ pub async fn run(app:&AppHandle,request:&crate::tools::ToolRequest)->Result<Valu
     let project=settings.projects.iter().find(|project|project["id"].as_str()==Some(id)).ok_or("Select a project")?;
     let folder=project["folder"].as_str().ok_or("Project has no folder")?.to_string();
     let path=index_path(id)?;
-    let mut index:Index=match tokio::fs::read(&path).await {Ok(bytes)=>serde_json::from_slice(&bytes).map_err(|error|error.to_string())?,Err(error) if error.kind()==std::io::ErrorKind::NotFound=>Index::default(),Err(error)=>return Err(error.to_string())};
+    let mut index:Index=match crate::storage::read(&path) {Ok(bytes)=>serde_json::from_slice(&bytes).map_err(|error|error.to_string())?,Err(error) if error.kind()==std::io::ErrorKind::NotFound=>Index::default(),Err(error)=>return Err(error.to_string())};
     if request.name=="project.search" {
         if index.files.is_empty() {return Err("Index the project first".into());}
         if index.model!=settings.embedding_model || index.folder!=folder {return Err("Embedding model or folder changed; update the index".into());}
@@ -107,6 +107,6 @@ pub async fn run(app:&AppHandle,request:&crate::tools::ToolRequest)->Result<Valu
         let _=app.emit_to(crate::island::WINDOW_LABEL,"index-progress",json!({"projectId":id,"completed":position+1,"total":total}));
     }
     let bytes=serde_json::to_vec(&index).map_err(|error|error.to_string())?;
-    let temporary=path.with_extension("tmp");tokio::fs::write(&temporary,&bytes).await.map_err(|error|error.to_string())?;tokio::fs::rename(&temporary,&path).await.map_err(|error|error.to_string())?;
+    crate::storage::write(&path,&bytes).map_err(|error|error.to_string())?;
     Ok(json!({"files":index.files.len(),"chunks":index.files.values().map(|file|file.chunks.len()).sum::<usize>(),"updated":updated,"bytes":bytes.len(),"skipped":skipped,"documentLineNote":"PDF and DOCX line references refer to extracted text."}))
 }

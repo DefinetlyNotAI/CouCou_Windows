@@ -5,6 +5,7 @@ import { buildRuns } from "./runs";
 import { buildServices } from "./services";
 import { buildBackground } from "./background";
 import { buildStats } from "./stats";
+import { buildLibrary } from "./library";
 export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTMLElement,projectPicker:HTMLElement,pause:(paused:boolean)=>void,stop:()=>void) {
   const contextAnchor=document.createComment("context");context.before(contextAnchor);
   const activityAnchor=document.createComment("activity");activity.before(activityAnchor);
@@ -93,7 +94,7 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
   action("Build","coding.build",()=>({...(script.value.trim()?{script:script.value}:{}),cwd:cwd()}));
   const footer=h("section",{class:"workspace-pane workspace-bottom"},h("div",{class:"workspace-editor-header"},fileLabel,save),editor,
     h("h3",{text:"Terminal / Git / search / test logs"}),h("div",{class:"workspace-command-row"},script,search),h("details",{},h("summary",{text:"Git actions"}),h("div",{class:"workspace-command-row"},gitFiles,commitMessage,branchName)),terminalControls,notice,outputFiles,output);
-  right.append(runView.el,runStatus,buildServices(tool),buildBackground(),buildStats());
+  right.append(runView.el,runStatus,buildServices(tool),buildBackground(),buildStats(),buildLibrary());
   root.prepend(left);root.append(right,footer);
   function sync() {
     runView.sync();

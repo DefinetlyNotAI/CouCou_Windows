@@ -616,7 +616,7 @@ fn attach_file(message: &mut Value, name: &str, path: &str) -> Result<(), String
         .to_lowercase();
     let query = message["content"].as_str().unwrap_or_default().to_string();
     if matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "webp" | "gif") {
-        let bytes = std::fs::read(path).map_err(|e| format!("Cannot read image: {e}"))?;
+        let bytes = crate::storage::read(std::path::Path::new(path)).map_err(|e| format!("Cannot read image: {e}"))?;
         message["images"] = json!([base64_for(&bytes)]);
         message["content"] = json!(format!("File: {name}\n\n{query}"));
         return Ok(());
@@ -624,7 +624,7 @@ fn attach_file(message: &mut Value, name: &str, path: &str) -> Result<(), String
     if ext == "pdf" {
         return Err("PDFs need text extraction before local chat. Drop a text file instead.".into());
     }
-    let text = std::fs::read_to_string(path).map_err(|_| {
+    let text = crate::storage::read(std::path::Path::new(path)).and_then(|bytes|String::from_utf8(bytes).map_err(std::io::Error::other)).map_err(|_| {
         "Local chat supports UTF-8 text files and images with a vision model.".to_string()
     })?;
     message["content"] = json!(format!("File: {name}\nFile contents:\n{text}\n\n{query}"));

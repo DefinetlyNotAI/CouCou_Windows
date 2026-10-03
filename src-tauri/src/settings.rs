@@ -1,4 +1,4 @@
-// Preferences, stored as plain JSON in settings.json under platform::config_dir().
+// Preferences, stored as DPAPI-encrypted JSON under platform::config_dir().
 // No secret ever lands here — API keys live in the OS keychain (see secrets.rs).
 
 use serde::{Deserialize, Serialize};
@@ -58,6 +58,7 @@ pub struct Settings {
     #[serde(default)] pub model_aliases:std::collections::HashMap<String,String>,
     #[serde(default)] pub fallback_models:Vec<String>,
     #[serde(default="default_keep_alive")] pub model_keep_alive:String,
+    #[serde(default)] pub preference_profiles:Vec<serde_json::Value>,
 }
 
 fn enabled() -> bool {
@@ -126,7 +127,7 @@ impl Default for Settings {
             projects: Vec::new(),
             active_project_id: String::new(),
             embedding_model:default_embedding_model(),
-            model_aliases:Default::default(),fallback_models:Vec::new(),model_keep_alive:default_keep_alive(),
+            model_aliases:Default::default(),fallback_models:Vec::new(),model_keep_alive:default_keep_alive(),preference_profiles:Vec::new(),
         }
     }
 }
@@ -163,8 +164,8 @@ fn settings_path() -> PathBuf {
 }
 
 pub fn load() -> Settings {
-    match std::fs::read(settings_path()) {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+    match crate::storage::read(&settings_path()) {
+        Ok(bytes) => match serde_json::from_slice(&bytes){Ok(settings)=>{if let Err(error)=crate::storage::write(&settings_path(),&bytes){crate::log::line(format!("Settings encryption failed: {error}"));}settings},Err(_)=>Settings::default()},
         Err(_) => Settings::default(),
     }
 }
@@ -174,7 +175,7 @@ pub fn save(settings: &Settings) -> std::io::Result<()> {
     crate::platform::ensure_private_dir(&dir)?;
     let json = serde_json::to_vec_pretty(settings)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    std::fs::write(settings_path(), json)
+    crate::storage::write(&settings_path(), &json)
 }
 
 #[cfg(test)]

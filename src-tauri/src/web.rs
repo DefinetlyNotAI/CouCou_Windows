@@ -9,6 +9,13 @@ fn url(value: &str) -> Result<reqwest::Url,String> {
     Ok(url)
 }
 fn client() -> Result<reqwest::Client,String> { reqwest::Client::builder().timeout(std::time::Duration::from_secs(25)).user_agent("Mozilla/5.0 CouCou/0.1.1").build().map_err(|error| error.to_string()) }
+async fn browser(settings:&Settings,target:&str)->Result<Value,String>{
+    let endpoint=url(&settings.search_url).map_err(|_|"Set the browser provider URL to a local Chromium debugging endpoint, for example http://127.0.0.1:9222. Start Opera GX or another Chromium browser with remote debugging enabled.".to_string())?;
+    if endpoint.scheme()!="http" || !matches!(endpoint.host_str(),Some("127.0.0.1"|"localhost"|"[::1]")) {return Err("Browser debugging must use a local HTTP endpoint".into());}
+    let result=crate::tools::ps(include_str!("browser-read.ps1"),&json!({"endpoint":endpoint.as_str(),"url":target}),None).await?;
+    if result["exitCode"].as_i64()!=Some(0){return Err(format!("Browser retrieval failed: {}",result["stderr"].as_str().unwrap_or_default()));}
+    serde_json::from_str(result["stdout"].as_str().unwrap_or_default()).map_err(|error|error.to_string())
+}
 pub fn schemas() -> Vec<Value> {
     [("web.search","Search the web without an API key","query"),("web.fetch","Read a public web page","url"),("web.extract","Extract page text and links","url"),("web.open","Open a page in the user's browser","url")].into_iter().map(|(name,description,field)| {
         let mut properties = serde_json::Map::new(); properties.insert(field.into(),json!({"type":"string"}));
@@ -24,8 +31,7 @@ pub async fn run(settings: &Settings, name: &str, input: &Value) -> Result<Value
         let query = input["query"].as_str().filter(|query| !query.trim().is_empty()).ok_or("Missing query")?;
         if settings.search_provider == "browser" {
             let mut search = url("https://duckduckgo.com/")?; search.query_pairs_mut().append_pair("q",query);
-            crate::platform::open_url(search.as_str());
-            return Ok(json!({"opened":search.as_str(),"message":"Search opened in the user's browser; page contents are not available to this model."}));
+            return browser(settings,search.as_str()).await;
         }
         if matches!(settings.search_provider.as_str(),"searxng"|"custom") {
             let mut search = url(&settings.search_url)?;
@@ -52,6 +58,7 @@ pub async fn run(settings: &Settings, name: &str, input: &Value) -> Result<Value
         return Ok(json!({"results":results}));
     }
     let target = url(input["url"].as_str().ok_or("Missing URL")?)?;
+    if settings.search_provider=="browser" {return browser(settings,target.as_str()).await;}
     let response = client()?.get(target).send().await.map_err(|error| error.to_string())?.error_for_status().map_err(|error| error.to_string())?;
     let final_url = response.url().clone();
     let html = response.text().await.map_err(|error| error.to_string())?;
