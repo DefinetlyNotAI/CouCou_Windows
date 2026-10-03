@@ -4,4 +4,5 @@ export interface AgentRun {
   plan:string[];action:string;result:string;
   calls:{name:string;input:Record<string,unknown>;result?:string;error?:string}[];
   permissions:{id:string;tool:string;category:string;decision?:string}[];
+  firstTokenAt?:number;finishedAt?:number;promptTokens?:number;outputTokens?:number;generationSeconds?:number;tps?:number;
 }

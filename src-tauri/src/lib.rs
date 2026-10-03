@@ -38,6 +38,20 @@ fn tool_decision(id: String, decision: String) -> Result<(),String> { permission
 #[tauri::command]fn background_list(app:AppHandle)->Vec<background::Task>{background::list(&app)}
 #[tauri::command]fn background_stop(app:AppHandle,id:String)->Result<(),String>{background::stop(&app,&id)}
 #[tauri::command]
+async fn system_stats(app:AppHandle)->Result<serde_json::Value,String>{
+    let script=r#"$os=Get-CimInstance Win32_OperatingSystem; $gpu=$null; try {$gpu=(Get-Counter '\GPU Engine(*)\Utilization Percentage' -ErrorAction Stop).CounterSamples | Measure-Object CookedValue -Sum | Select-Object -ExpandProperty Sum} catch {}; @{ramTotalBytes=[double]$os.TotalVisibleMemorySize*1024;ramUsedBytes=([double]$os.TotalVisibleMemorySize-[double]$os.FreePhysicalMemory)*1024;gpuEnginePercentSum=$gpu} | ConvertTo-Json -Compress"#;
+    let request=tools::ToolRequest{name:"powershell.run".into(),input:serde_json::json!({"script":script}),chat_id:String::new(),project_id:String::new()};
+    let result=tools::execute(&app,&request).await?;
+    let mut stats:serde_json::Value=serde_json::from_str(result["stdout"].as_str().unwrap_or("{}")).map_err(|error|error.to_string())?;
+    fn size(path:&std::path::Path)->u64 {std::fs::read_dir(path).map(|entries|entries.filter_map(Result::ok).map(|entry|entry.metadata().map(|meta|if meta.is_dir(){size(&entry.path())}else{meta.len()}).unwrap_or(0)).sum()).unwrap_or(0)}
+    stats["diskBytes"]=serde_json::json!(size(&platform::local_dir())+size(&platform::config_dir()));
+    stats["indexBytes"]=serde_json::json!(size(&platform::local_dir().join("indexes")));
+    let url=app.state::<Shared>().settings.lock().unwrap().ollama_url.clone();
+    let client=reqwest::Client::builder().timeout(std::time::Duration::from_secs(5)).build().map_err(|error|error.to_string())?;
+    stats["loadedModels"]=match client.get(format!("{}/api/ps",url.trim_end_matches('/'))).send().await {Ok(response)=>response.json::<serde_json::Value>().await.unwrap_or(serde_json::Value::Null),Err(_)=>serde_json::Value::Null};
+    Ok(stats)
+}
+#[tauri::command]
 async fn project_attach(folder: String) -> Result<serde_json::Value,String> {
     let folder=std::path::PathBuf::from(folder);
     if !folder.is_absolute() { return Err("Enter an absolute Windows folder path".into()); }
@@ -419,6 +433,7 @@ pub fn run() {
         .manage(background::Background::default())
         .manage(voice::Voice::default())
         .invoke_handler(tauri::generate_handler![
+            system_stats,
             boot,
             tool_run,
             tool_decision,

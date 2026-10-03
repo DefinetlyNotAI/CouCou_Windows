@@ -405,6 +405,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
       State.chatStatus = event.text;
       State.stateOverride = "thinking";
     } else if (event.phase === "streaming") {
+      if(run && !run.firstTokenAt)run.firstTokenAt=Date.now();
       bufferedReply += event.text;
       if (assistant && streamLive) assistant.content = bufferedReply;
       State.chatStatus = "Generating reply…";
@@ -428,6 +429,9 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     } else if (event.phase === "metrics") {
       const speed = Number(event.text);
       State.tokensPerSecond = Number.isFinite(speed) && speed >= 0 ? speed : null;
+      if(run && State.tokensPerSecond!==null)run.tps=State.tokensPerSecond;
+    } else if(event.phase==="usage" && run) {
+      try {const usage=JSON.parse(event.text);run.promptTokens=usage.prompt_eval_count;run.outputTokens=(run.outputTokens||0)+(usage.eval_count||0);run.generationSeconds=(run.generationSeconds||0)+(usage.eval_duration||0)/1e9;}catch {}
     } else if(event.phase==="tool-output") {
       State.toolResults.push({tool:event.tool || "Tool",content:event.text}); State.toolResults=State.toolResults.slice(-100);
       const call=run?.calls.filter(call=>call.name===event.tool && !call.result).at(-1);if(call)call.result=event.text;
@@ -578,7 +582,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
       if (State.chatRequestId !== requestId || State.chatHistory !== conversation) return false;
       replyMessage.content = reply.text;
       replyMessage.status = "complete";
-      const completedRun=State.runs.find(run=>run.id===requestId);if(completedRun){completedRun.status="complete";completedRun.result=reply.text;}
+      const completedRun=State.runs.find(run=>run.id===requestId);if(completedRun){completedRun.status="complete";completedRun.result=reply.text;completedRun.finishedAt=Date.now();}
       if (State.droppedFile === file) { State.droppedFile = null; State.promptContext = null; }
       sources.set(replyMessage.id, reply.sources);
       State.chatStatus = "";

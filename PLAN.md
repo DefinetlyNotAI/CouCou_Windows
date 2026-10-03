@@ -1,6 +1,8 @@
 # CouCou implementation plan
 
-Status: stages 1–17 implementation landed; runtime verification remains partial as recorded below. Stage 18 is next. Preserve the full 20-stage scope and one implementation commit per stage. User requested no further test execution.
+Status: stages 1–18 implementation landed; runtime verification remains partial as recorded below. Stage 19 is next. Preserve the full 20-stage scope and one implementation commit per stage. User requested no further test execution.
+
+Stage 18: statistics view aggregates saved model turns and tool outcomes, captures Ollama token/context counts and generation durations, TPS, frontend-observed first-token latency and turn duration; native refresh reads Windows RAM/GPU counters, Ollama loaded-model VRAM data, local disk and index bytes. Unsupported counters are unavailable rather than invented. No tests executed.
 
 Stage 17: permission-gated background PowerShell commands, logfile watches, process/port completion watches, daily local schedules restored on launch, cancellation, completion notifications, logs, and task status in island pills. No tests executed; runtime behavior remains unverified at the user's request.
 

@@ -30,6 +30,7 @@ export interface BootInfo {
 }
 
 export const Bridge = {
+  systemStats:()=>callOrThrow<unknown>("system_stats"),
   backgroundList:()=>callOrThrow<BackgroundTask[]>("background_list"),
   backgroundStop:(id:string)=>callOrThrow<void>("background_stop",{id}),
   runningApps: () => callOrThrow<{ executable: string; title: string }[]>("running_apps"),

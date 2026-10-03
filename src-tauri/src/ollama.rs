@@ -458,6 +458,7 @@ async fn stream_reply<F: Fn(ChatProgress) + Send + Sync>(
                 emit(progress(id, "thinking", "Thinking…", None));
             }
             if chunk.get("done").and_then(Value::as_bool) == Some(true) {
+                emit(progress(id,"usage",&json!({"prompt_eval_count":chunk["prompt_eval_count"],"eval_count":chunk["eval_count"],"eval_duration":chunk["eval_duration"]}).to_string(),None));
                 if let (Some(tokens), Some(duration)) = (
                     chunk.get("eval_count").and_then(Value::as_f64),
                     chunk.get("eval_duration").and_then(Value::as_f64).filter(|value| *value > 0.0),
