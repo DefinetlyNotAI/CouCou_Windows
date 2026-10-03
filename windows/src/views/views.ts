@@ -5,6 +5,7 @@ import { ICONS } from "./icons";
 import { State } from "../core/state";
 import { washRGBA, type IslandViewName, type Wash } from "../core/layout";
 import { buildPrompt } from "./chat";
+import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
 import { buildChoose, buildUpload, buildUploading } from "./upload";
 
 export interface ViewActions {
@@ -46,12 +47,13 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const gearBtn = h("button", { title: "Settings", "aria-label": "Settings", onclick: () => go("settings") }, svg(ICONS.gear, 14));
   const soundBtn = h("button", { title: "Mute", "aria-label": "Mute", onclick: () => actions.toggleSound() }, svg(ICONS.speakerOn, 14));
   const minimizeBtn = h("button", {
-    title: "Minimize Coucou",
-    "aria-label": "Minimize Coucou",
+    title: "Minimize",
+    "aria-label": "Minimize",
     onclick: () => actions.minimize(),
   }, svg(ICONS.minimize, 14));
 
   function go(view: IslandViewName) {
+    if (view === "prompt") State.setFocus("integration_ollama");
     actions.blip();
     actions.setView(view);
   }
@@ -86,13 +88,14 @@ export function buildHeader(actions: ViewActions): ViewHost {
 // ── Overview ──────────────────────────────────────────────────────────────────
 
 function buildOverview(actions: ViewActions): ViewHost {
+  const name = h("span", { class: "name", text: "Ollama" });
   const model = h("div", { class: "overview-model" });
   const status = h("div", { class: "overview-state" });
   const activity = h("div", { class: "activity-list" });
   const leftBody = h(
     "div",
     { class: "overview-summary" },
-    h("div", { class: "overview-who" }, dot("#22C55E", 7), h("span", { class: "name", text: "Ollama" })),
+    h("div", { class: "overview-who" }, dot("#22C55E", 7), name),
     h("div", { class: "overview-label", text: "Selected model" }),
     model,
     status,
@@ -101,25 +104,62 @@ function buildOverview(actions: ViewActions): ViewHost {
       btn("Settings", "secondary", () => actions.openSettingsWindow()),
     ),
   );
+  const tabs = h("div", { class: "provider-tabs" });
+  const leftCard = card(null, leftBody);
+  let detailOpen = false;
+  let providerKey = "";
+  let currentProvider = "";
+  let tabsKey = "";
+  const hooks: IntegrationCardHooks = {
+    get detailOpen() { return detailOpen; },
+    openDetail() { detailOpen = true; State.notify(); },
+    closeDetail() { detailOpen = false; State.notify(); },
+    openSettings() { actions.openSettingsWindow(); },
+  };
   const rightBody = h(
     "div",
     { class: "overview-activity" },
     h("div", { class: "overview-label", text: "Recent activity" }),
     activity,
+    tabs,
   );
   const el = h(
     "div",
     { class: "view overview" },
-    h("div", { class: "left" }, card(null, leftBody)),
+    h("div", { class: "left" }, leftCard),
     h("div", { class: "right" }, card(null, rightBody)),
   );
-  let lastActivity = "";
+  let lastActivity: string | null = null;
 
   return {
     el,
     sync() {
       const task = State.focusTask;
-      model.textContent = State.settings.ollamaModel || "Choose a model in Settings";
+      const browser = State.settings.chatBackend === "browser";
+      name.textContent = browser ? "Browser AI" : "Ollama";
+      model.textContent = (browser ? State.settings.browserModel : State.settings.ollamaModel) || "Choose a model in Settings";
+      model.title = model.textContent;
+      const provider = task?.id ?? "integration_ollama";
+      if (provider !== currentProvider) { detailOpen = false; currentProvider = provider; }
+      const keyForCard = JSON.stringify([provider, State.integrations[provider], task?.steps, task?.state, detailOpen]);
+      if (keyForCard !== providerKey) {
+        providerKey = keyForCard;
+        clear(leftCard);
+        leftCard.append(provider === "integration_ollama" || !task ? leftBody : renderIntegrationCard(task, hooks));
+      }
+      const choices = State.otherTasks;
+      const keyForTabs = JSON.stringify([choices.map(item => [item.id, item.pillBadge]), browser]);
+      if (keyForTabs !== tabsKey) {
+        tabsKey = keyForTabs;
+        clear(tabs);
+        for (const choice of choices) {
+          const label = choice.id === "integration_ollama" && browser ? "Browser AI" : choice.name;
+          const button = h("button", { class: "service-tab", text: label, onclick: () => { detailOpen = false; State.setFocus(choice.id); } });
+          button.prepend(dot(choice.color, 5));
+          if (choice.pillBadge) button.append(h("span", { class: `service-badge ${choice.pillBadge}`, text: choice.pillBadge === "error" ? "!" : "✓" }));
+          tabs.append(button);
+        }
+      }
       status.textContent = State.chatBusy
         ? State.chatStatus || "Working…"
         : task?.state === "idle"

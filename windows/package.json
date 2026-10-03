@@ -1,7 +1,7 @@
 {
   "name": "coucou-windows",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.1-ollama",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -17,6 +17,7 @@
     "vite": "^6"
   },
   "dependencies": {
+    "@mlc-ai/web-llm": "0.2.85",
     "@tauri-apps/api": "^2"
   }
 }

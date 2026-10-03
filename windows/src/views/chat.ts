@@ -2,6 +2,7 @@
 import { h, svg, clear } from "./dom";
 import { ICONS } from "./icons";
 import { Bridge, onEvent, type ChatContext, type ChatProgress, type ChatSource } from "../core/bridge";
+import { BrowserAI } from "../core/browser-ai";
 import { Sound } from "../core/sound";
 import { State, type ChatMessage } from "../core/state";
 import type { ViewHost } from "./views";
@@ -31,7 +32,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   const status = h("div", { class: "chat-status", role: "status" });
   const input = h("input", { type: "text", class: "chat-input", placeholder: "Ask me anything…", spellcheck: "false", "aria-label": "Message" }) as HTMLInputElement;
   const send = h("button", { class: "send-btn", title: "Send", "aria-label": "Send" }, svg(ICONS.arrowUp, 11)) as HTMLButtonElement;
-  const reset = h("button", { class: "chat-reset", text: "New chat", title: "Start a new conversation" }) as HTMLButtonElement;
+  const reset = h("button", { class: "chat-reset", title: "New chat", "aria-label": "New chat" }, svg(ICONS.plus, 13)) as HTMLButtonElement;
   const bar = h("div", { class: "chat-bar" }, reset, input, send);
   const el = h("div", { class: "view" }, h("div", { class: "card wash chat-card" }, h("div", { class: "chat-body" }, chipRow, log, status, bar)));
   (el.querySelector(".card") as HTMLElement).style.setProperty("--wash", "rgba(99,102,241,0.5)");
@@ -41,8 +42,9 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   let stopping = false;
   let resetting = false;
   let turnFinished: Promise<void> | null = null;
+  let activeBackend: "ollama" | "browser" = "ollama";
   const sources = new Map<number, ChatSource[]>();
-  const listening = onEvent<ChatProgress>("chat-progress", (event) => {
+  const handleProgress = (event: ChatProgress) => {
     if (event.requestId !== State.chatRequestId || !State.chatBusy || stopping) return;
     const task = State.focusTask;
     if (event.phase === "generating") {
@@ -57,18 +59,22 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       State.chatStatus = event.text;
       State.stateOverride = event.tool?.startsWith("web_") ? "searching" : "working";
       if (task) State.appendStep(task.id, event.text);
+    } else if (event.phase === "metrics") {
+      const speed = Number(event.text);
+      State.tokensPerSecond = Number.isFinite(speed) && speed >= 0 ? speed : null;
     } else if (event.phase === "loading" || event.phase === "thinking") {
       State.chatStatus = event.text;
     }
     State.notify();
-  });
+  };
+  const listening = onEvent<ChatProgress>("chat-progress", handleProgress);
 
   function stop() {
     const requestId = State.chatRequestId;
     if (!requestId) return;
     stopping = true;
     State.chatStatus = "Stopping reply…";
-    void Bridge.chatCancel(requestId);
+    void (activeBackend === "browser" ? BrowserAI.cancel(requestId) : Bridge.chatCancel(requestId));
     State.notify();
     onHeightChange();
   }
@@ -80,6 +86,8 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     const query = input.value.trim();
     if (!query) return;
     const requestId = crypto.randomUUID();
+    const settings = { ...State.settings };
+    activeBackend = settings.chatBackend;
     const conversation = State.chatHistory;
     const file = State.droppedFile;
     const context: ChatContext | null = conversation.length === 0 && file ? { kind: "file", name: file.name, path: file.path } : null;
@@ -92,6 +100,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     State.chatRequestId = requestId;
     State.chatBusy = true;
     State.chatStatus = "Loading model…";
+    State.tokensPerSecond = null;
     State.stateOverride = "thinking";
     conversation.push(user, replyMessage);
     const task = State.focusTask;
@@ -105,10 +114,13 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       const reply = await Promise.race([
         listening.then(() => {
           if (State.chatRequestId !== requestId || stopping) throw new Error("Reply stopped.");
-          return Bridge.chatSend(requestId, query, context);
+          return activeBackend === "browser"
+            ? BrowserAI.send(requestId, query, context, settings, handleProgress)
+            : Bridge.chatSend(requestId, query, context);
         }),
         new Promise<never>((_, reject) => {
-          watchdog = window.setTimeout(() => reject(new Error("The reply timed out. Check Ollama or try a smaller model.")), (Math.max(30, Math.min(600, State.settings.chatTimeoutSeconds)) + 5) * 1000);
+          const seconds = Math.max(30, Math.min(600, settings.chatTimeoutSeconds)) + (activeBackend === "browser" ? 605 : 5);
+          watchdog = window.setTimeout(() => reject(new Error("The reply timed out. Check the model backend or try a smaller model.")), seconds * 1000);
         }),
       ]);
       if (State.chatRequestId !== requestId || State.chatHistory !== conversation) return;
@@ -119,7 +131,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       Sound.play("finish");
     } catch (err) {
       if (State.chatRequestId !== requestId || State.chatHistory !== conversation) return;
-      void Bridge.chatCancel(requestId);
+      void (activeBackend === "browser" ? BrowserAI.cancel(requestId) : Bridge.chatCancel(requestId));
       conversation.splice(conversation.indexOf(user), 2);
       assistant = null;
       input.value = query;
@@ -147,10 +159,12 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     if (State.chatBusy) stop();
     await turnFinished;
     await Bridge.chatReset();
+    await BrowserAI.reset();
     State.chatHistory = [];
     State.droppedFile = null;
     State.promptContext = null;
     State.chatStatus = "";
+    State.tokensPerSecond = null;
     input.value = "";
     sources.clear();
     resetting = false;

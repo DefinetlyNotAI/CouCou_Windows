@@ -3,7 +3,8 @@
 import type { BotEmoteName, BotStateName, IslandMode, IslandViewName } from "./layout";
 import type { EyeShape } from "../mochi/engine";
 
-export type AgentSource = "ollama";
+export type AgentSource = "ollama" | "n8n";
+export type PillBadge = "finished" | "error";
 
 export interface AgentTask {
   id: string;
@@ -16,6 +17,14 @@ export interface AgentTask {
   isIntegration: boolean;
   emote?: BotEmoteName | null;
   miniEye?: EyeShape | null;
+  pillBadge?: PillBadge | null;
+}
+
+export interface IntegrationInfo {
+  data: Record<string, unknown>;
+  error: string | null;
+  loaded: boolean;
+  configured: boolean;
 }
 
 export interface ChatMessage {
@@ -33,13 +42,17 @@ export interface Settings {
   soundVolume: number;
   autoCloseInterval: number;
   absenceInterval: number;
+  activeIntegrations: string[];
   screen: "primary" | "cursor";
   autostart: boolean;
+  hiddenPrograms: string[];
   ollamaUrl: string;
   ollamaModel: string;
   toolsEnabled: boolean;
   webSearchEnabled: boolean;
   chatTimeoutSeconds: number;
+  chatBackend: "ollama" | "browser";
+  browserModel: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -47,13 +60,19 @@ export const DEFAULT_SETTINGS: Settings = {
   soundVolume: 0.12,
   autoCloseInterval: 15,
   absenceInterval: 180,
+  activeIntegrations: [
+    "integration_resend", "integration_n8n", "integration_vercel", "integration_github",
+  ],
   screen: "primary",
   autostart: false,
+  hiddenPrograms: [],
   ollamaUrl: "http://127.0.0.1:11434",
   ollamaModel: "",
   toolsEnabled: true,
   webSearchEnabled: true,
   chatTimeoutSeconds: 120,
+  chatBackend: "ollama",
+  browserModel: "Llama-3.2-1B-Instruct-q4f16_1-MLC",
 };
 
 type Listener = () => void;
@@ -69,12 +88,29 @@ const ollamaTask = (): AgentTask => ({
   isIntegration: true,
 });
 
+const integrationTask = (
+  id: string, name: string, color: string,
+): AgentTask => ({
+  id, name, color, state: "idle", stepIndex: 0, steps: [], source: "n8n", isIntegration: true,
+});
+
+export const INTEGRATION_AGENTS: AgentTask[] = [
+  integrationTask("integration_resend", "Resend", "#22C55E"),
+  integrationTask("integration_n8n", "n8n", "#F29B38"),
+  integrationTask("integration_vercel", "Vercel", "#7C5CFF"),
+  integrationTask("integration_github", "GitHub", "#F4505E"),
+  integrationTask("integration_notion", "Notion", "#8C8C8C"),
+  integrationTask("integration_calcom", "Cal.com", "#C9956A"),
+  integrationTask("integration_stripe", "Stripe", "#0570DE"),
+];
+
 class AppState {
   mode: IslandMode = "hidden";
   view: IslandViewName = "overview";
 
   tasks: AgentTask[] = [ollamaTask()];
   focusId: string | null = "integration_ollama";
+  integrations: Record<string, IntegrationInfo> = {};
 
   stateOverride: BotStateName | null = null;
 
@@ -97,6 +133,7 @@ class AppState {
   chatBusy = false;
   chatStatus = "";
   chatRequestId: string | null = null;
+  tokensPerSecond: number | null = null;
 
   lastActivity = performance.now();
 
@@ -118,13 +155,26 @@ class AppState {
     return this.tasks.find((t) => t.id === this.focusId) ?? this.tasks[0] ?? null;
   }
 
+  get otherTasks(): AgentTask[] {
+    return this.tasks.filter((task) => task.id !== this.focusId);
+  }
+
   get effectiveState(): BotStateName {
     return this.stateOverride ?? this.focusTask?.state ?? "idle";
   }
 
   setFocus(id: string) {
-    if (!this.tasks.some((task) => task.id === id)) return;
+    const task = this.tasks.find((item) => item.id === id);
+    if (!task) return;
     this.focusId = id;
+    task.pillBadge = null;
+    this.notify();
+  }
+
+  setPillBadge(id: string, badge: PillBadge | null) {
+    const task = this.tasks.find((item) => item.id === id);
+    if (!task) return;
+    task.pillBadge = badge;
     this.notify();
   }
 
@@ -142,6 +192,31 @@ class AppState {
     if (task.steps.length > 20) task.steps.shift();
     task.stepIndex = task.steps.length - 1;
     this.notify();
+  }
+
+  loadIntegrationTasks() {
+    for (const proto of INTEGRATION_AGENTS) {
+      const shouldLoad = this.settings.activeIntegrations.includes(proto.id);
+      const index = this.tasks.findIndex((task) => task.id === proto.id);
+      if (shouldLoad && index < 0) this.tasks.push({ ...proto, steps: [] });
+      if (!shouldLoad && index >= 0) this.tasks.splice(index, 1);
+    }
+    const order = ["integration_ollama", ...INTEGRATION_AGENTS.map((task) => task.id)];
+    this.tasks.sort((left, right) => order.indexOf(left.id) - order.indexOf(right.id));
+    if (!this.tasks.some((task) => task.id === this.focusId)) this.focusId = "integration_ollama";
+    this.notify();
+  }
+
+  toggleIntegration(id: string) {
+    const active = this.settings.activeIntegrations;
+    if (active.includes(id)) {
+      this.settings.activeIntegrations = active.filter((item) => item !== id);
+      if (this.focusId === id) this.focusId = "integration_ollama";
+    } else {
+      if (active.length >= 4) return;
+      this.settings.activeIntegrations = [...active, id];
+    }
+    this.loadIntegrationTasks();
   }
 
   defaultView(): IslandViewName {

@@ -8,9 +8,14 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
+#[cfg(target_os = "windows")]
+use std::time::Instant;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Monitor, PhysicalPosition, PhysicalSize, WebviewWindow};
+
+#[cfg(target_os = "windows")]
+use windows::Win32::Foundation::RECT;
 
 use crate::platform::{self, cursor_physical, left_button_down};
 
@@ -89,6 +94,23 @@ impl PollGate {
         self.cv.notify_all();
     }
 
+    #[cfg(target_os = "windows")]
+    fn wait_until_active(&self) -> bool {
+        let mut guard = self.active.lock().unwrap();
+        while !*guard {
+            let (next, timeout) = self
+                .cv
+                .wait_timeout(guard, Duration::from_millis(250))
+                .unwrap();
+            guard = next;
+            if timeout.timed_out() && !*guard {
+                return false;
+            }
+        }
+        true
+    }
+
+    #[cfg(not(target_os = "windows"))]
     fn wait_until_active(&self) {
         let mut guard = self.active.lock().unwrap();
         while !*guard {
@@ -194,20 +216,44 @@ fn current_screen_key(app: &AppHandle) -> Option<(i32, i32, u32, u32, u64)> {
 /// visible. Parked on a condvar the rest of the time.
 pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<PollGate>) {
     std::thread::spawn(move || {
-        let mut was_down = false;
         // Remembered across wakes so a display change while hidden is noticed the
         // moment the island comes back.
         let mut last_screen: Option<(i32, i32, u32, u32, u64)> = None;
+        #[cfg(target_os = "windows")]
+        let mut visibility_state = None;
+        #[cfg(target_os = "windows")]
+        let mut visibility_checked_at = None;
+        #[cfg(target_os = "windows")]
+        let mut visibility_emitted_at = Instant::now();
         // Without a cursor to read (Linux) the loop only watches the display
         // layout, and twice a second is plenty for that: waking at 60 Hz just to
         // find no cursor costs CPU for nothing.
         let (period, screen_every) = if platform::CURSOR_POLL { (16, 30) } else { (500, 1) };
         loop {
+            #[cfg(target_os = "windows")]
+            if !gate.wait_until_active() {
+                update_visibility_state(
+                    &app,
+                    &mut visibility_state,
+                    &mut visibility_checked_at,
+                    &mut visibility_emitted_at,
+                );
+                continue;
+            }
+            #[cfg(not(target_os = "windows"))]
             gate.wait_until_active();
             let mut last = (f64::MIN, f64::MIN);
             let mut ticks: u32 = 0;
             while gate.is_active() {
                 std::thread::sleep(Duration::from_millis(period));
+
+                #[cfg(target_os = "windows")]
+                update_visibility_state(
+                    &app,
+                    &mut visibility_state,
+                    &mut visibility_checked_at,
+                    &mut visibility_emitted_at,
+                );
 
                 // Monitors get plugged in, unplugged, rearranged and rescaled, and
                 // an island pinned to coordinates that no longer exist is an island
@@ -236,10 +282,10 @@ pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<PollGate>) {
                     Ok(s) => (s.width as f64 / scale, s.height as f64 / scale),
                     Err(_) => (PANEL_W, PANEL_H),
                 };
-                if (x - last.0).abs() < 1.0 && (y - last.1).abs() < 1.0 {
-                    continue;
+                let moved = (x - last.0).abs() >= 1.0 || (y - last.1).abs() >= 1.0;
+                if moved {
+                    last = (x, y);
                 }
-                last = (x, y);
 
                 // Click-through: the window only takes the mouse over the island
                 // shape. A small entry margin means the flag is already off by the
@@ -261,17 +307,7 @@ pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<PollGate>) {
                 // A press may be the start of a drag: make sure the drop target is
                 // ours before the file arrives.
                 let down = left_button_down();
-                if down && !was_down {
-                    let handle = app.clone();
-                    let _ = app.run_on_main_thread(move || platform::unblock_webview_drops(&handle));
-                }
-                was_down = down;
-
-                let dragging = down
-                    && x >= 0.0
-                    && x <= size.0
-                    && y >= 0.0
-                    && y <= size.1;
+                let dragging = down && x >= 0.0 && x <= size.0 && y >= 0.0 && y <= size.1;
 
                 let accept = on_island || dragging;
                 if gate.ignoring.load(Ordering::Relaxed) == accept {
@@ -279,10 +315,69 @@ pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<PollGate>) {
                     let _ = win.set_ignore_cursor_events(!accept);
                 }
 
+                if !moved {
+                    continue;
+                }
+
                 let _ = win.emit("cursor", CursorPayload { x, y });
             }
         }
     });
+}
+
+#[cfg(target_os = "windows")]
+fn update_visibility_state(
+    app: &AppHandle,
+    last_state: &mut Option<bool>,
+    last_checked_at: &mut Option<Instant>,
+    last_emitted_at: &mut Instant,
+) {
+    let now = Instant::now();
+    if last_checked_at
+        .is_some_and(|checked_at| now.duration_since(checked_at) < Duration::from_millis(250))
+    {
+        return;
+    }
+    *last_checked_at = Some(now);
+
+    let Some(shared) = app.try_state::<crate::Shared>() else {
+        return;
+    };
+    let (screen, hidden_programs) = {
+        let settings = shared.settings.lock().unwrap();
+        (settings.screen.clone(), settings.hidden_programs.clone())
+    };
+    let Some(monitor) = target_monitor(app, &screen) else {
+        return;
+    };
+    let position = *monitor.position();
+    let size = *monitor.size();
+    let Some(width) = i32::try_from(size.width).ok() else {
+        return;
+    };
+    let Some(height) = i32::try_from(size.height).ok() else {
+        return;
+    };
+    let Some(right) = position.x.checked_add(width) else {
+        return;
+    };
+    let Some(bottom) = position.y.checked_add(height) else {
+        return;
+    };
+    let bounds = RECT {
+        left: position.x,
+        top: position.y,
+        right,
+        bottom,
+    };
+    let blocked = platform::visibility_blocked(bounds, &hidden_programs);
+    if *last_state != Some(blocked)
+        || now.duration_since(*last_emitted_at) >= Duration::from_secs(1)
+    {
+        let _ = app.emit_to(WINDOW_LABEL, "visibility-blocked", blocked);
+        *last_state = Some(blocked);
+        *last_emitted_at = now;
+    }
 }
 
 /// Re-applies click-through after the window or the island changed shape.

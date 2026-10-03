@@ -3,6 +3,7 @@
 mod ollama;
 mod files;
 mod island;
+mod integrations;
 mod log;
 mod platform;
 mod secrets;
@@ -126,6 +127,12 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
+/// Tray pause stops all configured service pollers until the island is resumed.
+#[tauri::command]
+fn set_paused(paused: bool) {
+    integrations::set_paused(paused);
+}
+
 // ── Chat, files and secrets ───────────────────────────────────────────────────
 
 /// One local chat turn. File bytes stay on the Rust side.
@@ -168,6 +175,22 @@ async fn ollama_model_info(url: String, model: String) -> Result<ollama::ModelIn
     ollama::model_info(&url, &model).await
 }
 
+#[tauri::command]
+fn browser_tools(shared: State<Shared>) -> Vec<serde_json::Value> {
+    ollama::browser_tools(&shared.settings.lock().unwrap())
+}
+
+#[tauri::command]
+async fn browser_tool(shared: State<'_, Shared>, name: String, arguments: serde_json::Value) -> Result<ollama::BrowserToolResult, String> {
+    let settings = shared.settings.lock().unwrap().clone();
+    ollama::browser_tool(&settings, &name, &arguments).await
+}
+
+#[tauri::command]
+fn browser_context(context: ChatContext) -> Result<String, String> {
+    ollama::browser_context(context)
+}
+
 /// Copies a dropped file into the inbox and reports its name back.
 #[tauri::command]
 fn ingest_file(path: String) -> Result<DroppedFile, String> {
@@ -188,6 +211,20 @@ fn secret_set(key: String, value: String) -> Result<(), String> {
 #[tauri::command]
 fn secret_clear(key: String) -> Result<(), String> {
     secrets::clear(&key)
+}
+
+/// Opens the configured n8n instance.
+#[tauri::command]
+fn open_n8n() {
+    if let Some(url) = secrets::get("n8n-url") {
+        open_url(url);
+    }
+}
+
+/// Refresh buttons in the integration cards.
+#[tauri::command]
+async fn refresh_integration(app: AppHandle, id: String) {
+    integrations::poll_once(app, &id).await;
 }
 
 /// Lets the island write to the same log as the Rust side.
@@ -225,7 +262,7 @@ fn create_settings_window(app: &AppHandle) {
     let url = settings_page_url(app);
     match WebviewWindowBuilder::new(app, "settings", url)
         .additional_browser_args(BROWSER_ARGS)
-        .title("Settings — Coucou")
+        .title("Settings — CouCou Shahm Edition")
         .inner_size(560.0, 680.0)
         .min_inner_size(460.0, 480.0)
         .resizable(true)
@@ -286,16 +323,22 @@ pub fn run() {
             reposition,
             open_url,
             quit_app,
+            set_paused,
             log_line,
             chat_send,
             chat_reset,
             chat_cancel,
             ollama_models,
             ollama_model_info,
+            browser_tools,
+            browser_tool,
+            browser_context,
             ingest_file,
             secret_present,
             secret_set,
             secret_clear,
+            refresh_integration,
+            open_n8n,
             open_settings_window,
         ])
         .setup(move |app| {
@@ -318,7 +361,8 @@ pub fn run() {
             gate.set_active(true);
             island::spawn_cursor_poll(handle.clone(), gate.clone());
 
-            log::line(format!("--- Coucou {} started ---", env!("CARGO_PKG_VERSION")));
+            log::line(format!("--- CouCou Shahm Edition v{} started ---", env!("CARGO_PKG_VERSION")));
+            integrations::start(handle.clone());
             Ok(())
         })
         .run(tauri::generate_context!())

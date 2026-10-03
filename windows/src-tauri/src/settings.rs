@@ -11,9 +11,13 @@ pub struct Settings {
     pub sound_volume: f64,
     pub auto_close_interval: f64,
     pub absence_interval: f64,
+    #[serde(default = "default_active_integrations")]
+    pub active_integrations: Vec<String>,
     /// "primary" = the main display, "cursor" = whichever display the mouse is on.
     pub screen: String,
     pub autostart: bool,
+    #[serde(default)]
+    pub hidden_programs: Vec<String>,
     #[serde(default = "default_ollama_url")]
     pub ollama_url: String,
     // Separate from the older build's remote model preference.
@@ -25,6 +29,10 @@ pub struct Settings {
     pub web_search_enabled: bool,
     #[serde(default = "default_chat_timeout")]
     pub chat_timeout_seconds: u64,
+    #[serde(default = "default_chat_backend")]
+    pub chat_backend: String,
+    #[serde(default = "default_browser_model")]
+    pub browser_model: String,
 }
 
 fn enabled() -> bool {
@@ -32,6 +40,23 @@ fn enabled() -> bool {
 }
 fn default_chat_timeout() -> u64 {
     120
+}
+
+fn default_chat_backend() -> String {
+    "ollama".into()
+}
+
+fn default_browser_model() -> String {
+    "Llama-3.2-1B-Instruct-q4f16_1-MLC".into()
+}
+
+fn default_active_integrations() -> Vec<String> {
+    vec![
+        "integration_resend".into(),
+        "integration_n8n".into(),
+        "integration_vercel".into(),
+        "integration_github".into(),
+    ]
 }
 
 fn default_ollama_url() -> String {
@@ -45,13 +70,17 @@ impl Default for Settings {
             sound_volume: 0.12,
             auto_close_interval: 15.0,
             absence_interval: 180.0,
+            active_integrations: default_active_integrations(),
             screen: "primary".into(),
             autostart: false,
+            hidden_programs: Vec::new(),
             ollama_url: default_ollama_url(),
             ollama_model: String::new(),
             tools_enabled: true,
             web_search_enabled: true,
             chat_timeout_seconds: default_chat_timeout(),
+            chat_backend: default_chat_backend(),
+            browser_model: default_browser_model(),
         }
     }
 }

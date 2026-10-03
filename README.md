@@ -171,7 +171,7 @@ The macOS app is native Swift 6 / SwiftUI / AppKit with **zero third-party depen
 **Windows**
 
 - A [Tauri 2](https://tauri.app) app (Rust + TypeScript): the island is a transparent, always-on-top window that never steals focus, Mochi is drawn in Canvas 2D with the same shapes, timings and sounds as on the Mac.
-- Ollama is the only Windows integration: streaming local chat, tool hooks, and optional Ollama web search. Web keys live in Windows Credential Manager.
+- CouCou Shahm Edition supports local Ollama or browser WebGPU chat, tool hooks, optional web search, and third-party service integrations. Keys live in Windows Credential Manager.
 - Details and differences in [`windows/README.md`](windows/README.md).
 
 **Linux**

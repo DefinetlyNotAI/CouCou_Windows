@@ -50,7 +50,7 @@ export const PANEL_H = 320;
 
 // No notch on a PC: these are the hidden/compact sizes from docs/SPEC.md.
 export const NOTCH_W = 184;
-export const NOTCH_H = 32;
+export const NOTCH_H = 42;
 export const COMPACT_W = 288; // NOTCH_W + 104
 export const EXPANDED_W = 640;
 
@@ -62,7 +62,7 @@ export const WAKE_STRIP_W = 240;
 export const WAKE_STRIP_H = 6;
 
 export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
-  overview: { height: 160, botX: 68, botY: null, botDiameter: 58, agentMode: "none" },
+  overview: { height: 200, botX: 68, botY: null, botDiameter: 58, agentMode: "none" },
   empty: { height: 160, botX: 70, botY: null, botDiameter: 62, agentMode: "none" },
   confused: { height: 160, botX: 76, botY: null, botDiameter: 66, agentMode: "column" },
   upload: { height: 176, botX: 140, botY: 104, botDiameter: 62, agentMode: "column" },

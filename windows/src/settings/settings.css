@@ -195,7 +195,8 @@ input[type="range"]::-webkit-slider-thumb {
 input[type="number"],
 input[type="text"],
 input[type="password"],
-select {
+select,
+textarea {
   font: 400 12.5px var(--font);
   background: rgba(255, 255, 255, 0.07);
   border: 1px solid var(--hairline);
@@ -204,12 +205,17 @@ select {
   padding: 5px 8px;
 }
 
+textarea {
+  line-height: 1.5;
+}
+
 input::placeholder {
   color: var(--dim-2);
 }
 
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
   outline: none;
   border-color: rgba(255, 255, 255, 0.28);
 }

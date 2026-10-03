@@ -401,6 +401,14 @@ async fn stream_reply<F: Fn(ChatProgress) + Send + Sync>(
             {
                 emit(progress(id, "thinking", "Thinking…", None));
             }
+            if chunk.get("done").and_then(Value::as_bool) == Some(true) {
+                if let (Some(tokens), Some(duration)) = (
+                    chunk.get("eval_count").and_then(Value::as_f64),
+                    chunk.get("eval_duration").and_then(Value::as_f64).filter(|value| *value > 0.0),
+                ) {
+                    emit(progress(id, "metrics", &(tokens * 1_000_000_000.0 / duration).to_string(), None));
+                }
+            }
             if reply.push(chunk)? {
                 return Ok(reply.message);
             }
@@ -408,6 +416,42 @@ async fn stream_reply<F: Fn(ChatProgress) + Send + Sync>(
         if eof {
             return Err("Ollama ended the stream before finishing its reply.".into());
         }
+    }
+}
+
+pub fn browser_tools(settings: &Settings) -> Vec<Value> {
+    if !settings.tools_enabled { return Vec::new(); }
+    tool_schemas(settings.web_search_enabled && secrets::get("ollama-web-key").is_some())
+}
+
+#[derive(Serialize)]
+pub struct BrowserToolResult {
+    content: String,
+    sources: Vec<Source>,
+}
+
+pub async fn browser_tool(settings: &Settings, name: &str, arguments: &Value) -> Result<BrowserToolResult, String> {
+    let tools = browser_tools(settings);
+    if !tools.iter().any(|tool| tool["function"]["name"].as_str() == Some(name)) {
+        return Err("This tool is disabled or unavailable.".into());
+    }
+    let key = if settings.web_search_enabled { secrets::get("ollama-web-key") } else { None };
+    let mut sources = Vec::new();
+    let value = execute_tool(name, arguments, key.as_deref(), &mut sources).await?;
+    Ok(BrowserToolResult { content: value.to_string(), sources })
+}
+
+pub fn browser_context(context: ChatContext) -> Result<String, String> {
+    match context {
+        ChatContext::File { name, path } => {
+            let mut message = json!({"content":""});
+            attach_file(&mut message, &name, &path)?;
+            if message.get("images").is_some() {
+                return Err("The browser models support text files. Use an Ollama vision model for images.".into());
+            }
+            Ok(message["content"].as_str().unwrap_or_default().into())
+        }
+        ChatContext::Window { app_name, title, url } => Ok(format!("App: {app_name}, Window: {title}, URL: {}", url.unwrap_or_default())),
     }
 }
 
@@ -792,6 +836,7 @@ mod tests {
             .unwrap();
             assert!(!reply.text.is_empty());
             assert!(events.lock().unwrap().iter().any(|event| event.phase == "streaming"));
+            assert!(events.lock().unwrap().iter().any(|event| event.phase == "metrics" && event.text.parse::<f64>().is_ok_and(|speed| speed > 0.0)));
             if !model.starts_with("gemma") {
                 assert!(events.lock().unwrap().iter().any(|event| event.phase == "tool-start"));
             }

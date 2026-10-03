@@ -22,7 +22,7 @@ const PACKAGES = {
     {
       dir: "nsis",
       suffix: "-setup.exe",
-      names: [`Coucou-Windows-${version}-setup.exe`, "Coucou-Windows-setup.exe"],
+      names: [`CouCou-Shahm-Edition-v${version}-setup.exe`, "CouCou-Shahm-Edition-setup.exe"],
     },
   ],
   linux: [

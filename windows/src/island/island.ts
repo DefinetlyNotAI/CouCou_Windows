@@ -3,8 +3,9 @@
 
 import { Tracked, Spring, clamp } from "../core/anim";
 import { Bridge, IS_TAURI, onDragDrop } from "../core/bridge";
+import { BrowserAI } from "../core/browser-ai";
 import {
-  EXPANDED_CORNER, EXPANDED_W, NOTCH_W, PANEL_H, PANEL_W, WAKE_STRIP_H, WAKE_STRIP_W,
+  EXPANDED_CORNER, EXPANDED_W, NOTCH_W, PANEL_H, PANEL_W,
   ROUNDED_CORNER, VIEW_LAYOUTS, botGlowColor, botGlowOpacity, botPosition, chatPromptHeight,
   islandSize,
   type IslandMode, type IslandViewName,
@@ -41,6 +42,7 @@ export class Island {
   private viewsEl!: HTMLElement;
   private botCanvas!: HTMLCanvasElement;
   private botGlow!: HTMLElement;
+  private botMetrics!: HTMLElement;
   private greetingCanvas!: HTMLCanvasElement;
   private countdown!: HTMLElement;
   private wakeStrip!: HTMLElement;
@@ -68,7 +70,7 @@ export class Island {
   private collapsed = false;
   private collapseTimer: number | null = null;
   private wasInIsland = false;
-  private suppressWakeUntilExit = false;
+  private visibilityBlocked = false;
   /** Last shape handed to Rust for the click-through test. */
   private pushedRect = { x: -1, y: -1, w: -1, h: -1 };
   private homeCollapseAt: number | null = null;
@@ -130,6 +132,7 @@ export class Island {
 
     this.wakeStrip = h("div", { id: "wake-strip" });
     this.botGlow = h("div", { id: "bot-glow" });
+    this.botMetrics = h("div", { id: "bot-metrics", text: "— TPS", title: "Generated tokens per second" });
     this.botCanvas = h("canvas", { id: "bot-canvas" });
     this.greetingCanvas = h("canvas", { id: "greeting-canvas" });
     this.countdown = h("div", { id: "countdown" });
@@ -165,6 +168,7 @@ export class Island {
       this.clipEl,
       this.botGlow,
       this.botCanvas,
+      this.botMetrics,
       this.countdown,
     );
 
@@ -246,6 +250,7 @@ export class Island {
   }
 
   expand(view: IslandViewName) {
+    if (this.visibilityBlocked) return;
     this.stopSequenceIfLeaving(view);
     State.view = view;
     if (State.mode !== "expanded") this.setMode("expanded");
@@ -256,6 +261,7 @@ export class Island {
   }
 
   setView(view: IslandViewName) {
+    if (this.visibilityBlocked) return;
     this.stopSequenceIfLeaving(view);
     if (State.mode !== "expanded") {
       this.fsm.forceHome();
@@ -281,14 +287,17 @@ export class Island {
   }
 
   minimize() {
-    State.isPinned = false;
-    this.fsm.pinned = false;
-    this.suppressWakeUntilExit = true;
-    this.fsm.forceHidden();
+    this.collapse();
+  }
+
+  setVisibilityBlocked(blocked: boolean) {
+    this.visibilityBlocked = blocked;
+    this.fsm.setBlocked(blocked);
   }
 
   /** Open a view directly from an app action, such as the tray or file drop. */
   alert(view: IslandViewName) {
+    if (this.visibilityBlocked) return;
     this.fsm.pinned = State.isPinned;
     this.fsm.forceHome();
     this.expand(view);
@@ -307,7 +316,7 @@ export class Island {
 
   private onDragDrop(e: { type: string; paths?: string[] }) {
     if (e.type !== "over") void Bridge.log(`drag ${e.type} ${e.paths?.length ?? 0} file(s)`);
-    if (State.paused) return;
+    if (this.visibilityBlocked) return;
     switch (e.type) {
       case "enter":
       case "over": {
@@ -357,16 +366,19 @@ export class Island {
     State.chatRequestId = null;
     State.chatBusy = false;
     State.chatStatus = "";
+    State.tokensPerSecond = null;
     State.stateOverride = null;
     void (async () => {
       if (requestId) {
         try {
           await Bridge.chatCancel(requestId);
+          await BrowserAI.cancel(requestId);
         } catch (error) {
           void Bridge.log(`could not cancel chat request ${requestId}: ${String(error)}`);
         }
       }
       await Bridge.chatReset();
+      await BrowserAI.reset();
     })();
 
     UploadSeq.performDrop(State.uploadDuration);
@@ -504,7 +516,7 @@ export class Island {
     // The wake strip is the only thing the OS can hit while the island is hidden.
     this.wakeStrip.addEventListener("mouseenter", () => {
       Sound.resume();
-      if (!State.paused && !this.suppressWakeUntilExit && State.mode === "hidden") this.fsm.mouseEntered();
+      if (!this.visibilityBlocked && State.mode === "hidden") this.fsm.mouseEntered();
     });
 
     this.islandEl.addEventListener("mousedown", (e) => {
@@ -560,13 +572,7 @@ export class Island {
     const inIsland =
       x >= rect.x - HIT_MARGIN && x <= rect.x + rect.w + HIT_MARGIN &&
       y >= rect.y - HIT_MARGIN && y <= rect.y + rect.h + HIT_MARGIN;
-    const wakeStripLeft = (PANEL_W - WAKE_STRIP_W) / 2;
-    const inWakeStrip =
-      x >= wakeStripLeft && x <= wakeStripLeft + WAKE_STRIP_W &&
-      y >= 0 && y <= WAKE_STRIP_H;
-    const inWakeZone = inIsland || inWakeStrip;
-    if (this.suppressWakeUntilExit && !inWakeZone) this.suppressWakeUntilExit = false;
-    const mayWake = !State.paused && !this.suppressWakeUntilExit;
+    const mayWake = !this.visibilityBlocked;
 
     if (inIsland && !this.wasInIsland) {
       if (mayWake) {
@@ -600,6 +606,7 @@ export class Island {
   }
 
   private isBotHit(x: number, y: number): boolean {
+    if (State.view === "settings" || this.visibilityBlocked) return false;
     const rect = this.islandRect();
     const cx = rect.x + this.botCx.value;
     const cy = rect.y + this.botCy.value;
@@ -735,10 +742,14 @@ export class Island {
 
     const greetingActive = State.mode === "expanded" && State.view === "greeting";
     // The drop canvas draws its own Mochi; two of them would overlap.
-    const visible = p.opacity > 0 && !greetingActive && !this.uploadActive;
+    const visible = p.opacity > 0 && !greetingActive && !this.uploadActive && !(State.mode === "expanded" && State.view === "settings");
     this.botCanvas.style.opacity = visible ? "1" : "0";
+    this.botMetrics.style.display = visible ? "block" : "none";
+    this.botMetrics.textContent = State.tokensPerSecond == null ? "— TPS" : `${State.tokensPerSecond.toFixed(1)} TPS`;
+    this.botMetrics.style.left = `${this.botCx.value}px`;
+    this.botMetrics.style.top = `${this.botCy.value + p.diameter / 2 + 3}px`;
 
-    if (State.mode === "expanded" && State.view !== "uploading" && !greetingActive && !this.uploadActive) {
+    if (visible && State.mode === "expanded" && State.view !== "uploading") {
       const d = p.diameter;
       const color = botGlowColor(State.effectiveState);
       this.botGlow.style.display = "block";

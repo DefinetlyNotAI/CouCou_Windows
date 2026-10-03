@@ -65,6 +65,10 @@ export const Bridge = {
   chatCancel: (requestId: string) => call<void>("chat_cancel", { requestId }),
   ollamaModels: (url: string) => callOrThrow<string[]>("ollama_models", { url }),
   ollamaModelInfo: (url: string, model: string) => callOrThrow<{ tools: boolean; vision: boolean; thinking: boolean }>("ollama_model_info", { url, model }),
+  browserTools: () => callOrThrow<unknown[]>("browser_tools"),
+  browserTool: (name: string, input: Record<string, unknown>) =>
+    callOrThrow<{ content: string; sources: ChatSource[] }>("browser_tool", { name, arguments: input }),
+  browserContext: (context: ChatContext) => callOrThrow<string>("browser_context", { context }),
   chatReset: () => call<void>("chat_reset"),
   /** Copies a dropped file into the inbox. */
   ingestFile: (path: string) => callOrThrow<DroppedFile>("ingest_file", { path }),
@@ -72,8 +76,9 @@ export const Bridge = {
   secretPresent: (key: string) => call<boolean>("secret_present", { key }),
   secretSet: (key: string, value: string) => callOrThrow<void>("secret_set", { key, value }),
   secretClear: (key: string) => callOrThrow<void>("secret_clear", { key }),
-
-
+  refreshIntegration: (id: string) => call<void>("refresh_integration", { id }),
+  openN8n: () => call<void>("open_n8n"),
+  setPaused: (paused: boolean) => call<void>("set_paused", { paused }),
 };
 
 export type ChatContext =
@@ -96,6 +101,8 @@ export type BridgeEvent =
   | { name: "cursor"; payload: { x: number; y: number } }
   | { name: "tray"; payload: string }
   | { name: "chat-progress"; payload: ChatProgress }
+  | { name: "integration"; payload: IntegrationUpdate }
+  | { name: "visibility-blocked"; payload: boolean }
   | { name: "screen-changed"; payload: null };
 
 export interface DragDropPayload {
@@ -118,3 +125,9 @@ export async function onEvent<T>(name: string, handler: (payload: T) => void) {
 
 export interface ChatSource { title: string; url: string; }
 export interface ChatProgress { requestId: string; phase: string; text: string; tool: string | null; }
+export interface IntegrationUpdate {
+  id: string;
+  data: Record<string, unknown>;
+  error: string | null;
+  event: { success: boolean; label: string; detail: string | null } | null;
+}
