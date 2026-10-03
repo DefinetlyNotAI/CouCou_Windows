@@ -6,7 +6,7 @@ import type { AgentProfile } from "./agents";
 import type { Project } from "./projects";
 import type { AgentRun } from "./runs";
 
-export type AgentSource = "ollama" | "n8n";
+export type AgentSource = "ollama" | "n8n" | "local";
 export type PillBadge = "finished" | "error";
 
 export interface AgentTask {

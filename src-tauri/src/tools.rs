@@ -17,6 +17,8 @@ pub fn category(name: &str) -> Option<&'static str> {
     Some(match name {
         "filesystem.read" | "filesystem.list" | "git.status" | "git.diff" | "git.log" | "git.conflicts" | "repository.search" => "read",
         "coding.test" | "coding.lint" | "coding.build" => "run",
+        "task.start" | "task.stop" => "run",
+        "task.list" => "read",
         "project.index" | "project.search" => "read",
         "agent.plan" | "agent.delegate" => "read",
         "filesystem.write" | "git.stage" | "git.unstage" | "git.commit" | "git.branch" => "write",
@@ -57,6 +59,8 @@ pub fn schemas() -> Vec<Value> {
     let mut tools: Vec<Value> = definitions.into_iter().map(|(name, description, properties, required)| json!({"type":"function","function":{"name":name,"description":description,"parameters":{"type":"object","properties":properties,"required":required,"additionalProperties":false}}})).collect();
     tools.extend(crate::web::schemas());
     tools.extend(crate::services::schemas());
+    tools.push(json!({"type":"function","function":{"name":"task.start","description":"Start a background command, log/port/process watcher or daily schedule; sends completion notifications","parameters":{"type":"object","properties":{"name":{"type":"string"},"kind":{"type":"string","enum":["command","log","port","process","schedule"]},"script":{"type":"string"},"cwd":{"type":"string"},"path":{"type":"string"},"port":{"type":"integer"},"pid":{"type":"integer"},"time":{"type":"string"}},"required":["kind"]}}}));
+    for name in ["task.list","task.stop"] {tools.push(json!({"type":"function","function":{"name":name,"description":name,"parameters":{"type":"object","properties":{"id":{"type":"string"}}}}}));}
     tools.push(json!({"type":"function","function":{"name":"agent.plan","description":"Record a concrete plan for a multi-step task before executing it","parameters":{"type":"object","properties":{"steps":{"type":"array","items":{"type":"string"}}},"required":["steps"]}}}));
     tools.push(json!({"type":"function","function":{"name":"agent.delegate","description":"Ask an isolated local model helper to analyze a focused task. This helper has no tools.","parameters":{"type":"object","properties":{"goal":{"type":"string"},"model":{"type":"string"},"name":{"type":"string"}},"required":["goal"]}}}));
     tools.push(json!({"type":"function","function":{"name":"project.index","description":"Incrementally index a project with local embeddings respecting gitignore","parameters":{"type":"object","properties":{"projectId":{"type":"string"}}}}}));
@@ -100,6 +104,9 @@ pub async fn execute(app: &AppHandle, request: &ToolRequest) -> Result<Value, St
     let request=normalized.as_ref().unwrap_or(request);
     let input = &request.input;
     match request.name.as_str() {
+        "task.start"=>{let id=format!("task-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());crate::background::start(app.clone(),crate::background::Task{id,name:input["name"].as_str().unwrap_or("Local task").into(),kind:text(input,"kind")?.into(),input:input.clone(),status:"working".into(),logs:Vec::new(),last_day:String::new()})},
+        "task.list"=>Ok(json!({"tasks":crate::background::list(app)})),
+        "task.stop"=>{crate::background::stop(app,text(input,"id")?)?;Ok(json!({"stopped":true}))},
         "repository.search"=> {
             let cwd=text(input,"cwd")?.to_string();let query=text(input,"query")?.to_string();
             tokio::task::spawn_blocking(move|| {

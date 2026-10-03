@@ -8,6 +8,7 @@ mod web;
 mod mcp;
 mod index;
 mod services;
+mod background;
 mod permissions;
 mod files;
 mod island;
@@ -34,6 +35,8 @@ use settings::Settings;
 async fn tool_run(app: AppHandle, request: tools::ToolRequest) -> Result<serde_json::Value,String> { permissions::run(&app,&request).await }
 #[tauri::command]
 fn tool_decision(id: String, decision: String) -> Result<(),String> { permissions::decide(id,decision) }
+#[tauri::command]fn background_list(app:AppHandle)->Vec<background::Task>{background::list(&app)}
+#[tauri::command]fn background_stop(app:AppHandle,id:String)->Result<(),String>{background::stop(&app,&id)}
 #[tauri::command]
 async fn project_attach(folder: String) -> Result<serde_json::Value,String> {
     let folder=std::path::PathBuf::from(folder);
@@ -413,12 +416,15 @@ pub fn run() {
             gate: gate.clone(),
         })
         .manage(Chat::default())
+        .manage(background::Background::default())
         .manage(voice::Voice::default())
         .invoke_handler(tauri::generate_handler![
             boot,
             tool_run,
             tool_decision,
             tool_schemas,
+            background_list,
+            background_stop,
             project_attach,
             save_settings,
             set_collapsed,
@@ -471,6 +477,7 @@ pub fn run() {
 
             log::line(format!("--- CouCou Shahm Edition v{} started ---", env!("CARGO_PKG_VERSION")));
             integrations::start(handle.clone());
+            background::restore(handle.clone());
             Ok(())
         })
         .run(tauri::generate_context!())

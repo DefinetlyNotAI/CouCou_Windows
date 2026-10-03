@@ -30,6 +30,8 @@ export interface BootInfo {
 }
 
 export const Bridge = {
+  backgroundList:()=>callOrThrow<BackgroundTask[]>("background_list"),
+  backgroundStop:(id:string)=>callOrThrow<void>("background_stop",{id}),
   runningApps: () => callOrThrow<{ executable: string; title: string }[]>("running_apps"),
   monitors: () => callOrThrow<[string, string][]>("monitors"),
   chooseFile: () => callOrThrow<DroppedFile | null>("choose_file"),
@@ -98,6 +100,8 @@ export const Bridge = {
 export type ChatContext =
   | { kind: "file"; name: string; path: string }
   | { kind: "window"; appName: string; title: string; url?: string };
+
+export interface BackgroundTask {id:string;name:string;kind:string;input:Record<string,unknown>;status:string;logs:string[];lastDay:string}
 
 export interface DroppedFile {
   name: string;
