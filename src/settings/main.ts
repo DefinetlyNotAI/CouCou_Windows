@@ -565,6 +565,7 @@ async function main() {
     providerDetails,
     chatOptionsSection(keyPresent, keyCheckError),
     agentsSection(settings, save),
+    permissionsSection(),
     integrationsSection(present),
     generalSection(),
   );
@@ -575,3 +576,16 @@ async function main() {
 }
 
 void main();
+
+function permissionsSection(): HTMLElement {
+  const section = h("section", {}, h("h2", { text: "Tool permissions" }));
+  const rows = h("div");
+  function render() {
+    rows.replaceChildren(...Object.entries(settings.toolPermissions).map(([key, permission]) => h("div", { class: "row" },
+      h("span", { text: `${key}: ${permission}` }), h("button", { text: "Reset", onclick: () => { delete settings.toolPermissions[key]; void save(); render(); } }),
+    )));
+  }
+  render(); section.append(h("div", { class: "hint", text: "Tools ask before first use. Chat and project approvals last for this app session." }), rows);
+  void onEvent<Settings>("settings-changed", next => { settings.toolPermissions = next.toolPermissions; render(); });
+  return section;
+}

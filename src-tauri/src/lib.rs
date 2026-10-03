@@ -4,6 +4,7 @@ mod ollama;
 mod voice;
 mod desktop;
 mod tools;
+mod permissions;
 mod files;
 mod island;
 mod integrations;
@@ -24,6 +25,13 @@ use ollama::{Chat, ChatContext, ChatReply};
 use files::DroppedFile;
 use island::{PollGate, ScreenInfo};
 use settings::Settings;
+
+#[tauri::command]
+async fn tool_run(app: AppHandle, request: tools::ToolRequest) -> Result<serde_json::Value,String> { permissions::run(&app,&request).await }
+#[tauri::command]
+fn tool_decision(id: String, decision: String) -> Result<(),String> { permissions::decide(id,decision) }
+#[tauri::command]
+fn tool_schemas() -> Vec<serde_json::Value> { tools::schemas() }
 
 pub struct Shared {
     pub settings: Mutex<Settings>,
@@ -382,6 +390,9 @@ pub fn run() {
         .manage(voice::Voice::default())
         .invoke_handler(tauri::generate_handler![
             boot,
+            tool_run,
+            tool_decision,
+            tool_schemas,
             save_settings,
             set_collapsed,
             set_island_rect,

@@ -78,6 +78,28 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   const chipRow = h("div", { class: "chip-row" });
   const log = h("div", { class: "chat-log", "aria-live": "polite" });
   const status = h("div", { class: "chat-status", role: "status" });
+  const permissionPanel = h("div", { class: "tool-permissions" });
+  void onEvent<{ id: string; category: string; request: { name: string; input: unknown; chatId: string; projectId: string } }>("tool-permission", event => {
+    State.view = "prompt"; State.mode = "expanded";
+    const detail = h("pre", { text: JSON.stringify(event.request.input, null, 2) });
+    const row = h("div", { class: "tool-permission" }, h("strong", { text: `${event.request.name} · ${event.category}` }), detail);
+    const controls = h("div", { class: "permission-controls" });
+    let deciding = false;
+    for (const [decision, label] of [["once", "Allow once"], ["chat", "This chat"], ["project", "This project"], ["always", "Always allow"], ["deny", "Deny"]]) {
+      const button = h("button", { class: "link-btn", text: label, onclick: async () => {
+        if (deciding) return;
+        deciding = true;
+        try { await Bridge.toolDecision(event.id, decision); }
+        catch (error) { State.chatStatus = String(error); }
+        finally { row.remove(); State.notify(); onHeightChange(); }
+      } }) as HTMLButtonElement;
+      button.disabled = (decision === "project" && !event.request.projectId) || (decision === "chat" && !event.request.chatId);
+      controls.append(button);
+    }
+    row.append(controls); permissionPanel.append(row);
+    window.setTimeout(() => { row.remove(); onHeightChange(); }, 120000);
+    State.notify(); onHeightChange();
+  });
   const modelPicker = h("select", { class: "chat-picker", "aria-label": "Chat model" }) as HTMLSelectElement;
   const profilePicker = h("select", { class: "chat-picker", "aria-label": "Agent profile" }) as HTMLSelectElement;
   for (const profile of profiles(State.settings)) profilePicker.append(h("option", { value: profile.id, text: profile.name }));
@@ -117,7 +139,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   const readAloud = h("button", { class: "chat-reset", title: "Read reply aloud", "aria-label": "Read reply aloud" }, svg(ICONS.speakerOn, 14)) as HTMLButtonElement;
   const queueButton = h("button", { class: "chat-reset", title: "Queue message", "aria-label": "Queue message" }, svg("M4 4h12v2H4V4zm0 5h12v2H4V9zm0 5h7v2H4v-2zm14-1v3h3v2h-3v3h-2v-3h-3v-2h3v-3h2z", 14)) as HTMLButtonElement;
   const bar = h("div", { class: "chat-bar" }, reset, upload, microphone, call, readAloud, input, queueButton, send);
-  const el = h("div", { class: "view" }, h("div", { class: "card wash chat-card" }, h("div", { class: "chat-body" }, toolbar, quickActions, chipRow, log, activity, queued, status, bar)));
+  const el = h("div", { class: "view" }, h("div", { class: "card wash chat-card" }, h("div", { class: "chat-body" }, toolbar, quickActions, chipRow, log, permissionPanel, activity, queued, status, bar)));
   (el.querySelector(".card") as HTMLElement).style.setProperty("--wash", "rgba(99,102,241,0.5)");
 
   let renderedKey = "";

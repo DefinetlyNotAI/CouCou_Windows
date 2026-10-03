@@ -1,6 +1,6 @@
 # CouCou implementation plan
 
-Status: stages 1–5 implemented; runtime verification remains partial as recorded below. Stage 6 is next. Preserve the full 20-stage scope and one implementation commit per stage. User requested no further test execution; use compilation and diff inspection only for subsequent stages.
+Status: stages 1–6 implemented; runtime verification remains partial as recorded below. Stage 7 is next. Preserve the full 20-stage scope and one implementation commit per stage. User requested no further test execution; use compilation and diff inspection only for subsequent stages.
 
 Stage 1 changes implemented so far: sanitized Markdown, scroll-position preservation during generation, removable attachments, uploads without chat reset, attachment context on later turns, removal of the 200 KB text cap, compact service mascots, chat-only TPS, 0–100% audio volume, exact island bounds for drag entry, native file picker, running-app picker, mascot hover-animation wake-up, and locally saved chats that reopen from recent activity with conversation text restored to either backend.
 
@@ -22,7 +22,9 @@ Stage 4: stored editable agent profiles, personality controls, model selection, 
 
 Stage 5: shared structured request/schema/category/executor for filesystem, executable/PowerShell commands, processes, clipboard, screenshots, notifications, browser, HTTP, Git, and authenticated GitHub/Vercel requests. No arbitrary hooks executable exposed. Executor is internal until stage 6 adds approval routing; model access follows in stage 7. Native compilation passed; no tests executed.
 
-Stages 6–20 remain pending. Runtime checks listed above remain part of the full-goal verification scope; implementation commits do not claim those checks passed. The existing release installer predates these changes and needs rebuilding before delivery.
+Stage 6: approval requests with exact arguments, allow once/chat/project/always/deny, scoped session grants, persisted per-tool allow/deny and reset controls. Categories separate read/write/run/admin/network/browser/screen/clipboard/desktop. Profile denials and unknown-tool rejection apply; approval requests expire and cancellation drops pending receivers. Frontend/native compilation passed; no tests executed. Native interaction remains unverified.
+
+Stages 7–20 remain pending. Runtime checks listed above remain part of the full-goal verification scope; implementation commits do not claim those checks passed. The existing release installer predates these changes and needs rebuilding before delivery.
 
 ---
 

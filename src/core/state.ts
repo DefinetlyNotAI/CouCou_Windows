@@ -86,6 +86,7 @@ export interface Settings {
   agentProfile: string;
   agentPrompt: string;
   agentProfiles: AgentProfile[];
+  toolPermissions: Record<string, string>;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -112,6 +113,7 @@ export const DEFAULT_SETTINGS: Settings = {
   agentProfile: "general",
   agentPrompt: "",
   agentProfiles: [],
+  toolPermissions: {},
 };
 
 type Listener = () => void;

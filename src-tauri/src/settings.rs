@@ -45,6 +45,8 @@ pub struct Settings {
     pub agent_prompt: String,
     #[serde(default)]
     pub agent_profiles: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub tool_permissions: std::collections::HashMap<String,String>,
 }
 
 fn enabled() -> bool {
@@ -103,6 +105,7 @@ impl Default for Settings {
             agent_profile: default_agent_profile(),
             agent_prompt: String::new(),
             agent_profiles: Vec::new(),
+            tool_permissions: Default::default(),
         }
     }
 }

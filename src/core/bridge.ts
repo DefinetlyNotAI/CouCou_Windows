@@ -68,6 +68,9 @@ export const Bridge = {
   chatSend: (requestId: string, query: string, context: ChatContext | null, model?: string) =>
     callOrThrow<{ text: string; sources: ChatSource[] }>("chat_send", { requestId, query, context, model }),
   chatCancel: (requestId: string) => call<void>("chat_cancel", { requestId }),
+  toolRun: (request: { name: string; input: Record<string, unknown>; chatId: string; projectId?: string }) => callOrThrow<unknown>("tool_run", { request }),
+  toolDecision: (id: string, decision: string) => callOrThrow<void>("tool_decision", { id, decision }),
+  toolSchemas: () => callOrThrow<unknown[]>("tool_schemas"),
   voiceRun: (requestId: string, mode: "capabilities" | "listen" | "speak", text = "", volume = 100) =>
     callOrThrow<{ text?: string; voices?: string[]; languages?: string[] }>("voice_run", { requestId, mode, text, volume }),
   voiceCancel: (requestId: string) => call<void>("voice_cancel", { requestId }),
