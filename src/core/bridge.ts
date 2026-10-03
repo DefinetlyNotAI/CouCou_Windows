@@ -33,6 +33,7 @@ export const Bridge = {
   runningApps: () => callOrThrow<{ executable: string; title: string }[]>("running_apps"),
   monitors: () => callOrThrow<[string, string][]>("monitors"),
   chooseFile: () => callOrThrow<DroppedFile | null>("choose_file"),
+  desktopAction: (mode: "screenshot" | "clipboard" | "copy", text = "") => callOrThrow<{ text: string; file: DroppedFile | null }>("desktop_action", { mode, text }),
   boot: () => call<BootInfo>("boot"),
 
   saveSettings: (settings: Settings) => callOrThrow<void>("save_settings", { settings }),

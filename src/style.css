@@ -967,6 +967,7 @@ input[type="range"]::-webkit-slider-thumb {
 
 .chat-bar {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
@@ -983,6 +984,9 @@ input[type="range"]::-webkit-slider-thumb {
   font: 400 13px var(--font);
   outline: none;
   cursor: text;
+  resize: none;
+  line-height: 18px;
+  max-height: 64px;
 }
 
 .chat-input::placeholder {
@@ -1485,3 +1489,24 @@ input[type="range"]::-webkit-slider-thumb {
 .activity-chat:hover { color: white; }
 .activity-chat:disabled { opacity: .5; cursor: default; }
 .chat-reset.voice-active { color: var(--green); }
+.chat-toolbar { display: flex; gap: 6px; flex: 0 0 auto; align-items: center; margin-bottom: 6px; }
+.chat-picker { min-width: 0; border: 0; border-radius: 5px; padding: 4px 5px; background: var(--tab-on); color: var(--dim); font: 11px var(--font); }
+.chat-picker:first-child { flex: 1 1 auto; }
+.chat-picker:last-child { max-width: 120px; }
+.chat-picker:disabled { opacity: .45; }
+.chat-queue { flex: 0 1 auto; min-height: 20px; flex-direction: column; max-height: 70px; overflow-y: auto; margin-bottom: 5px; }
+.queued-message { display: flex; gap: 8px; align-items: center; color: var(--dim); font-size: 11px; padding: 2px 0; }
+.queued-message span { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-tool-activity { flex: 0 1 auto; min-height: 18px; max-height: 100px; overflow-y: auto; margin: 3px 0; color: var(--dim); font-size: 11px; }
+.chat-tool-activity summary { cursor: pointer; }
+.chat-tool-rows { max-height: 70px; overflow-y: auto; padding-top: 4px; }
+.tool-step { padding: 3px 0; overflow-wrap: anywhere; }
+.tool-step.failed { color: var(--red-text); }
+.chat-quick-actions { flex: 0 1 auto; min-height: 18px; max-height: 110px; overflow-y: auto; margin-bottom: 5px; color: var(--dim); font-size: 11px; }
+.chat-quick-actions summary { cursor: pointer; }
+.chat-quick-menu { display: flex; flex-wrap: wrap; gap: 12px; padding: 6px 0; }
+.chat-task-list { max-height: 54px; overflow-y: auto; }
+.chat-task { display: flex; width: 100%; align-items: center; gap: 6px; padding: 3px 0; border: 0; background: transparent; color: var(--dim); font: 11px var(--font); text-align: left; cursor: pointer; }
+.chat-task:hover { color: var(--ink); }
+.chat-task i { width: 5px; height: 5px; border-radius: 50%; }
+.chat-task span:last-child { margin-left: auto; }

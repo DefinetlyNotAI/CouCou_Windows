@@ -244,7 +244,8 @@ async fn run_turn<F: Fn(ChatProgress) + Send + Sync>(
         }
     }
     let start = history.len();
-    let mut messages = vec![json!({"role":"system", "content":SYSTEM_PROMPT})];
+    let system = if settings.agent_prompt.is_empty() { SYSTEM_PROMPT.to_string() } else { format!("{SYSTEM_PROMPT}\n\n{}", settings.agent_prompt) };
+    let mut messages = vec![json!({"role":"system", "content":system})];
     messages.extend(history.iter().cloned());
     messages.push(message);
     let mut calls_used = 0;
@@ -712,6 +713,7 @@ mod tests {
                         assert_eq!(body["model"], "local:test");
                         assert_eq!(body["tools"].as_array().unwrap().len(), 1);
                         let messages = body["messages"].as_array().unwrap();
+                        assert!(messages[0]["content"].as_str().unwrap().ends_with("Test profile instructions"));
                         if turn == 2 {
                             assert_eq!(
                                 messages[2]["tool_calls"][0]["function"]["name"],
@@ -758,6 +760,7 @@ mod tests {
                 ollama_url: url,
                 ollama_model: "local:test".into(),
                 web_search_enabled: false,
+                agent_prompt: "Test profile instructions".into(),
                 ..Settings::default()
             };
             let chat = Chat::default();

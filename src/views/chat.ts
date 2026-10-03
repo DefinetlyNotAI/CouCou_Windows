@@ -4,7 +4,7 @@ import { ICONS } from "./icons";
 import { Bridge, IS_TAURI, onEvent, type ChatContext, type ChatProgress, type ChatSource } from "../core/bridge";
 import { BrowserAI } from "../core/browser-ai";
 import { Sound } from "../core/sound";
-import { State, INTEGRATION_AGENTS, type ChatMessage } from "../core/state";
+import { State, INTEGRATION_AGENTS, QUICK_PROFILES, type ChatMessage } from "../core/state";
 import type { ViewHost } from "./views";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
@@ -29,6 +29,8 @@ export async function reopenChat(id: string): Promise<boolean> {
     State.promptContext = null;
     State.chatStatus = "";
     State.tokensPerSecond = null;
+    State.promptQueue = [];
+    State.toolActivity = [];
     State.notify();
     return true;
   } catch (error) {
@@ -67,12 +69,35 @@ function bubble(message: ChatMessage, sources: ChatSource[] = []): HTMLElement {
   return h("div", { class: "chat-row" }, reply);
 }
 
-export function buildPrompt(onHeightChange: () => void): ViewHost {
+export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: string) => void): ViewHost {
   State.loadChats();
   const chipRow = h("div", { class: "chip-row" });
   const log = h("div", { class: "chat-log", "aria-live": "polite" });
   const status = h("div", { class: "chat-status", role: "status" });
-  const input = h("input", { type: "text", class: "chat-input", placeholder: "Ask me anything…", spellcheck: "false", "aria-label": "Message" }) as HTMLInputElement;
+  const modelPicker = h("select", { class: "chat-picker", "aria-label": "Chat model" }) as HTMLSelectElement;
+  const profilePicker = h("select", { class: "chat-picker", "aria-label": "Agent profile" }) as HTMLSelectElement;
+  for (const profile of QUICK_PROFILES) profilePicker.append(h("option", { value: profile.id, text: profile.name }));
+  const recentPicker = h("select", { class: "chat-picker", "aria-label": "Recent chats" }) as HTMLSelectElement;
+  const pickerRefresh = h("button", { class: "chat-reset", title: "Refresh models", "aria-label": "Refresh models" }, svg("M17.65 6.35A7.95 7.95 0 0012 4a8 8 0 108 8h-2a6 6 0 11-1.76-4.24L13 11h7V4l-2.35 2.35z", 13)) as HTMLButtonElement;
+  const toolbar = h("div", { class: "chat-toolbar" }, modelPicker, pickerRefresh, profilePicker, recentPicker);
+  const quickMenu = h("div", { class: "chat-quick-menu" });
+  const tasks = h("div", { class: "chat-task-list" });
+  const quickActions = h("details", { class: "chat-quick-actions" }, h("summary", { text: "Quick actions" }), quickMenu, tasks);
+  quickActions.addEventListener("toggle", () => {
+    State.quickActionsExpanded = (quickActions as HTMLDetailsElement).open;
+    if (State.quickActionsExpanded) (activity as HTMLDetailsElement).open = false;
+    State.notify(); onHeightChange();
+  });
+  const queued = h("div", { class: "chat-queue" });
+  const activityRows = h("div", { class: "chat-tool-rows" });
+  const activitySummary = h("summary", { text: "Tool activity" });
+  const activity = h("details", { class: "chat-tool-activity" }, activitySummary, activityRows);
+  activity.addEventListener("toggle", () => {
+    State.toolActivityExpanded = (activity as HTMLDetailsElement).open;
+    if (State.toolActivityExpanded) (quickActions as HTMLDetailsElement).open = false;
+    State.notify(); onHeightChange();
+  });
+  const input = h("textarea", { rows: "1", class: "chat-input", placeholder: "Ask me anything…", spellcheck: "false", "aria-label": "Message" }) as HTMLTextAreaElement;
   const send = h("button", { class: "send-btn", title: "Send", "aria-label": "Send" }, svg(ICONS.arrowUp, 11)) as HTMLButtonElement;
   const reset = h("button", { class: "chat-reset", title: "New chat", "aria-label": "New chat" }, svg(ICONS.plus, 13)) as HTMLButtonElement;
   const upload = h("button", { class: "chat-reset", title: "Attach file", "aria-label": "Attach file", onclick: async () => {
@@ -86,15 +111,96 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   const call = h("button", { class: "chat-reset", title: "Start voice call", "aria-label": "Start voice call" },
     svg("M6.6 10.8a15 15 0 006.6 6.6l2.2-2.2a1 1 0 011-.24c1.1.37 2.3.56 3.6.56a1 1 0 011 1V20a1 1 0 01-1 1C10.1 21 3 13.9 3 5a1 1 0 011-1h3.5a1 1 0 011 1c0 1.2.2 2.5.56 3.6a1 1 0 01-.24 1l-2.22 2.2z", 14)) as HTMLButtonElement;
   const readAloud = h("button", { class: "chat-reset", title: "Read reply aloud", "aria-label": "Read reply aloud" }, svg(ICONS.speakerOn, 14)) as HTMLButtonElement;
-  const bar = h("div", { class: "chat-bar" }, reset, upload, microphone, call, readAloud, input, send);
-  const el = h("div", { class: "view" }, h("div", { class: "card wash chat-card" }, h("div", { class: "chat-body" }, chipRow, log, status, bar)));
+  const queueButton = h("button", { class: "chat-reset", title: "Queue message", "aria-label": "Queue message" }, svg("M4 4h12v2H4V4zm0 5h12v2H4V9zm0 5h7v2H4v-2zm14-1v3h3v2h-3v3h-2v-3h-3v-2h3v-3h2z", 14)) as HTMLButtonElement;
+  const bar = h("div", { class: "chat-bar" }, reset, upload, microphone, call, readAloud, input, queueButton, send);
+  const el = h("div", { class: "view" }, h("div", { class: "card wash chat-card" }, h("div", { class: "chat-body" }, toolbar, quickActions, chipRow, log, activity, queued, status, bar)));
   (el.querySelector(".card") as HTMLElement).style.setProperty("--wash", "rgba(99,102,241,0.5)");
 
   let renderedKey = "";
   let assistant: ChatMessage | null = null;
   let stopping = false;
   let resetting = false;
-  let turnFinished: Promise<void> | null = null;
+  let turnFinished: Promise<unknown> | null = null;
+  let submittedFile: { name: string; path: string } | null = null;
+  let modelKey = "";
+  let recentKey = "";
+  let queueKey = "";
+  let activityKey = "";
+  let taskKey = "";
+  let desktopBusy = false;
+  async function desktopAction(mode: "screenshot" | "clipboard" | "copy") {
+    if (desktopBusy) return;
+    desktopBusy = true;
+    if (mode !== "copy" && !State.chatBusy) State.chatStatus = mode === "screenshot" ? "Capturing screen…" : "Reading clipboard…";
+    const chatId = State.chatId;
+    State.notify();
+    try {
+      const text = mode === "copy" ? State.chatHistory.filter(message => message.role === "assistant").at(-1)?.content || "" : "";
+      const result = await Bridge.desktopAction(mode, text);
+      if (State.chatId !== chatId) return;
+      if (result.file) {
+        State.droppedFile = result.file;
+        State.promptContext = { kind: "file", name: result.file.name, path: result.file.path };
+      } else if (mode === "clipboard") input.value = [input.value, result.text].filter(Boolean).join("\n");
+      State.chatStatus = mode === "copy" ? "Reply copied." : "";
+      onHeightChange();
+    } catch (error) { if (State.chatId === chatId) State.chatStatus = String(error).replace(/^Error:\s*/, ""); }
+    finally { desktopBusy = false; State.notify(); }
+  }
+  const searchWeb = h("button", { class: "link-btn", text: "Search web", onclick: () => {
+    const query = input.value.trim();
+    if (!query) { input.focus(); return; }
+    void Bridge.openUrl(`https://duckduckgo.com/?q=${encodeURIComponent(query)}`);
+  } }) as HTMLButtonElement;
+  const screenshot = h("button", { class: "link-btn", text: "Screenshot", onclick: () => void desktopAction("screenshot") }) as HTMLButtonElement;
+  const pasteClipboard = h("button", { class: "link-btn", text: "Paste clipboard", onclick: () => void desktopAction("clipboard") }) as HTMLButtonElement;
+  const copyReply = h("button", { class: "link-btn", text: "Copy reply", onclick: () => void desktopAction("copy") }) as HTMLButtonElement;
+  quickMenu.append(searchWeb, screenshot, pasteClipboard, copyReply);
+  let refreshingModels = false;
+  async function refreshModels() {
+    if (refreshingModels) return;
+    refreshingModels = true;
+    State.notify();
+    try {
+      const current = State.settings.chatBackend === "browser" ? State.settings.browserModel : State.settings.ollamaModel;
+      const models = State.settings.chatBackend === "browser"
+        ? ["Llama-3.2-1B-Instruct-q4f16_1-MLC", "Hermes-2-Pro-Llama-3-8B-q4f16_1-MLC"]
+        : await Bridge.ollamaModels(State.settings.ollamaUrl);
+      modelPicker.replaceChildren(h("option", { value: "", text: "Choose a model" }), ...[...new Set([current, ...models].filter(Boolean))].map(model => h("option", { value: model, text: model })));
+      modelPicker.value = current;
+    } catch (error) { State.chatStatus = String(error).replace(/^Error:\s*/, ""); }
+    finally { refreshingModels = false; State.notify(); }
+  }
+  pickerRefresh.addEventListener("click", () => void refreshModels());
+  modelPicker.addEventListener("change", async () => {
+    const key = State.settings.chatBackend === "browser" ? "browserModel" : "ollamaModel";
+    const previous = State.settings[key];
+    const selected = modelPicker.value;
+    State.settings[key] = modelPicker.value;
+    try { if (IS_TAURI) await Bridge.saveSettings(State.settings); }
+    catch (error) {
+      if (State.settings[key] === selected) State.settings[key] = previous;
+      State.chatStatus = String(error).replace(/^Error:\s*/, "");
+    }
+    State.notify();
+  });
+  profilePicker.addEventListener("change", async () => {
+    const profile = QUICK_PROFILES.find(profile => profile.id === profilePicker.value);
+    if (!profile) return;
+    const previous = { id: State.settings.agentProfile, prompt: State.settings.agentPrompt };
+    State.settings.agentProfile = profile.id;
+    State.settings.agentPrompt = profile.prompt;
+    try { if (IS_TAURI) await Bridge.saveSettings(State.settings); }
+    catch (error) {
+      if (State.settings.agentProfile === profile.id) { State.settings.agentProfile = previous.id; State.settings.agentPrompt = previous.prompt; }
+      State.chatStatus = String(error).replace(/^Error:\s*/, "");
+    }
+    State.notify();
+  });
+  recentPicker.addEventListener("change", async () => {
+    if (await reopenChat(recentPicker.value)) onHeightChange();
+    recentPicker.value = "";
+  });
   let activeBackend: "ollama" | "browser" = "ollama";
   let voiceRequestId: string | null = null;
   let voiceMode: "listen" | "speak" | null = null;
@@ -195,7 +301,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   const sources = new Map<number, ChatSource[]>();
   const handleProgress = (event: ChatProgress) => {
     if (event.requestId !== State.chatRequestId || !State.chatBusy || stopping) return;
-    const task = State.focusTask;
+    const task = State.tasks.find(task => task.id === "integration_ollama");
     if (event.phase === "generating") {
       if (assistant) assistant.content = "";
       State.chatStatus = event.text;
@@ -205,6 +311,8 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       State.chatStatus = "Generating reply…";
       State.stateOverride = "working";
     } else if (["tool-start", "tool-result", "tool-error", "agent-start", "agent-result", "agent-error"].includes(event.phase)) {
+      State.toolActivity.push({ tool: event.tool || event.actor?.name || "Tool", phase: event.phase, text: event.text });
+      State.toolActivity = State.toolActivity.slice(-100);
       State.chatStatus = event.text;
       State.stateOverride = event.tool?.startsWith("web_") ? "searching" : "working";
       const tool = event.tool || event.actor?.name || "Tool";
@@ -238,30 +346,31 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   }
 
   let pendingUserId: number | null = null;
-  async function submit() {
-    if (resetting) return;
-    if (State.chatBusy) { stop(); return; }
-    const query = input.value.trim();
-    if (!query) return;
+  async function submit(queuedQuery?: string, queuedFile?: { name: string; path: string } | null): Promise<boolean> {
+    if (resetting) return false;
+    if (State.chatBusy) { stop(); return false; }
+    const query = (queuedQuery ?? input.value).trim();
+    if (!query) return false;
     const requestId = crypto.randomUUID();
     const settings = { ...State.settings };
     activeBackend = settings.chatBackend;
     const conversation = State.chatHistory;
-    const file = State.droppedFile;
+    const file = queuedQuery === undefined ? State.droppedFile : queuedFile ?? null;
+    submittedFile = file;
     const context: ChatContext | null = file ? { kind: "file", name: file.name, path: file.path } : null;
     pendingUserId = nextId++;
     const user: ChatMessage = { id: pendingUserId, role: "user", content: query };
     const replyMessage: ChatMessage = { id: nextId++, role: "assistant", content: "" };
     assistant = replyMessage;
     stopping = false;
-    input.value = "";
+    if (queuedQuery === undefined) input.value = "";
     State.chatRequestId = requestId;
     State.chatBusy = true;
     State.chatStatus = "Loading model…";
     State.tokensPerSecond = null;
     State.stateOverride = "thinking";
     conversation.push(user, replyMessage);
-    const task = State.focusTask;
+    const task = State.tasks.find(task => task.id === "integration_ollama");
     if (task) { task.state = "working"; task.steps = ["Starting local chat"]; task.stepIndex = 0; }
     Sound.play("send");
     State.notify();
@@ -281,22 +390,24 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
           watchdog = window.setTimeout(() => reject(new Error("The reply timed out. Check the model backend or try a smaller model.")), seconds * 1000);
         }),
       ]);
-      if (State.chatRequestId !== requestId || State.chatHistory !== conversation) return;
+      if (State.chatRequestId !== requestId || State.chatHistory !== conversation) return false;
       replyMessage.content = reply.text;
       if (State.droppedFile === file) { State.droppedFile = null; State.promptContext = null; }
       sources.set(replyMessage.id, reply.sources);
       State.chatStatus = "";
       if (task) { task.state = "finished"; State.appendStep(task.id, "Reply complete"); }
       Sound.play("finish");
+      return true;
     } catch (err) {
-      if (State.chatRequestId !== requestId || State.chatHistory !== conversation) return;
+      if (State.chatRequestId !== requestId || State.chatHistory !== conversation) return false;
       void (activeBackend === "browser" ? BrowserAI.cancel(requestId) : Bridge.chatCancel(requestId));
       conversation.splice(conversation.indexOf(user), 2);
       assistant = null;
-      input.value = query;
+      if (queuedQuery === undefined && !input.value.trim()) input.value = query;
       State.chatStatus = String(err).replace(/^Error:\s*/, "");
       if (task) { task.state = stopping ? "idle" : "error"; State.appendStep(task.id, State.chatStatus); }
       if (!stopping) Sound.play("error");
+      return false;
     } finally {
       if (watchdog !== null) window.clearTimeout(watchdog);
       if (State.chatRequestId === requestId) {
@@ -306,6 +417,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
         stopping = false;
         State.stateOverride = null;
         assistant = null;
+        submittedFile = null;
         State.saveChat();
         State.notify();
         onHeightChange();
@@ -318,6 +430,8 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     if (resetting) return;
     stopVoice();
     resetting = true;
+    State.promptQueue = [];
+    State.toolActivity = [];
     if (State.chatBusy) stop();
     await turnFinished;
     await Bridge.chatReset();
@@ -336,19 +450,100 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     onHeightChange();
   });
   function startSubmit() {
+    if (desktopBusy && !State.chatBusy) return;
     if (voiceMode || callActive) stopVoice();
     if (State.chatBusy) { stop(); return; }
-    turnFinished = submit();
+    launch();
   }
+  function launch(query?: string, file?: { name: string; path: string } | null, initialItem?: (typeof State.promptQueue)[number]) {
+    const chatId = State.chatId;
+    turnFinished = (async () => {
+      let success = await submit(query, file);
+      if (!success && initialItem && !resetting && State.chatId === chatId) State.promptQueue.unshift(initialItem);
+      while (success && !resetting && State.chatId === chatId && State.promptQueue.length) {
+        const item = State.promptQueue.shift()!;
+        State.notify();
+        success = await submit(item.text, item.file);
+        if (!success && !resetting && State.chatId === chatId) State.promptQueue.unshift(item);
+      }
+      State.notify();
+      onHeightChange();
+    })();
+  }
+  function enqueue() {
+    const text = input.value.trim();
+    if (!text || resetting || desktopBusy) return;
+    if (callActive || voiceMode) stopVoice();
+    const file = State.droppedFile !== submittedFile ? State.droppedFile : null;
+    State.promptQueue.push({ id: crypto.randomUUID(), text, file });
+    if (file) { State.droppedFile = null; State.promptContext = null; }
+    input.value = "";
+    State.notify();
+    onHeightChange();
+  }
+  queueButton.addEventListener("click", enqueue);
   send.addEventListener("click", startSubmit);
+  input.addEventListener("input", () => State.notify());
   input.addEventListener("keydown", (event) => {
-    if ((event as KeyboardEvent).key === "Enter") { event.preventDefault(); if (!State.chatBusy) startSubmit(); }
+    if ((event as KeyboardEvent).key === "Enter" && !(event as KeyboardEvent).shiftKey) { event.preventDefault(); if (State.chatBusy) enqueue(); else startSubmit(); }
     if ((event as KeyboardEvent).key !== "Escape") event.stopPropagation();
   });
 
   return {
     el,
     sync() {
+      searchWeb.disabled = !IS_TAURI;
+      screenshot.disabled = !IS_TAURI || desktopBusy;
+      pasteClipboard.disabled = !IS_TAURI || desktopBusy;
+      copyReply.disabled = !IS_TAURI || desktopBusy || !State.chatHistory.some(message => message.role === "assistant" && message.content);
+      const newTaskKey = JSON.stringify(State.tasks.map(task => [task.id, task.name, task.state, task.steps.at(-1)]));
+      if (newTaskKey !== taskKey) {
+        taskKey = newTaskKey;
+        tasks.replaceChildren(...State.tasks.map(task => h("button", { class: "chat-task", title: task.steps.at(-1) || task.state,
+          onclick: () => onTaskSelect(task.id),
+        }, h("i", { style: `background:${task.color}` }), h("span", { text: task.name }), h("span", { text: task.state }))));
+      }
+      const currentModel = State.settings.chatBackend === "browser" ? State.settings.browserModel : State.settings.ollamaModel;
+      const newModelKey = `${State.settings.chatBackend}:${State.settings.ollamaUrl}`;
+      if (modelKey !== newModelKey) {
+        modelKey = newModelKey;
+        modelPicker.replaceChildren(h("option", { value: currentModel, text: currentModel || "Choose a model" }));
+      }
+      if (currentModel && ![...modelPicker.options].some(option => option.value === currentModel)) modelPicker.append(h("option", { value: currentModel, text: currentModel }));
+      modelPicker.value = currentModel;
+      modelPicker.title = currentModel || "Choose a model";
+      modelPicker.disabled = State.chatBusy || State.voiceBusy || refreshingModels;
+      pickerRefresh.disabled = State.chatBusy || refreshingModels;
+      profilePicker.value = State.settings.agentProfile;
+      profilePicker.disabled = State.chatBusy || State.voiceBusy;
+      const newRecentKey = JSON.stringify(State.savedChats.map(chat => [chat.id, chat.updatedAt]));
+      if (newRecentKey !== recentKey) {
+        recentKey = newRecentKey;
+        recentPicker.replaceChildren(h("option", { value: "", text: "Recent chats" }), ...State.savedChats.map(chat => h("option", { value: chat.id, text: chat.title })));
+      }
+      recentPicker.disabled = State.chatBusy || State.voiceBusy || !State.savedChats.length;
+      const newQueueKey = JSON.stringify([State.promptQueue, State.chatBusy]);
+      if (newQueueKey !== queueKey) {
+        queueKey = newQueueKey;
+        queued.replaceChildren(...State.promptQueue.map(item => h("div", { class: "queued-message" },
+          h("span", { text: item.text, title: item.text }), h("button", { class: "chat-reset", title: "Remove queued message", "aria-label": "Remove queued message", onclick: () => {
+            State.promptQueue = State.promptQueue.filter(message => message.id !== item.id); State.notify(); onHeightChange();
+          } }, svg(ICONS.xmark, 10)))));
+        if (!State.chatBusy && State.promptQueue.length) queued.append(h("button", { class: "link-btn", text: "Run queued messages", onclick: () => {
+          if (State.chatBusy || resetting || desktopBusy) return;
+          stopVoice();
+          const item = State.promptQueue.shift();
+          if (item) launch(item.text, item.file, item);
+        } }));
+      }
+      queued.style.display = State.promptQueue.length ? "flex" : "none";
+      const newActivityKey = JSON.stringify(State.toolActivity);
+      if (newActivityKey !== activityKey) {
+        activityKey = newActivityKey;
+        activitySummary.textContent = `Tool activity (${State.toolActivity.length})`;
+        activityRows.replaceChildren(...State.toolActivity.slice(-12).map(item => h("div", { class: `tool-step ${item.phase.endsWith("error") ? "failed" : ""}`, text: item.text })));
+      }
+      activity.style.display = State.toolActivity.length ? "block" : "none";
       const file = State.droppedFile;
       const label = file?.name ?? "";
       if (chipRow.dataset.label !== label) {
@@ -373,8 +568,10 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       send.append(svg(State.chatBusy ? ICONS.xmark : ICONS.arrowUp, 11));
       send.title = State.chatBusy ? "Stop reply" : "Send";
       send.setAttribute("aria-label", send.title);
-      input.disabled = State.chatBusy;
-      send.disabled = stopping || resetting;
+      input.disabled = resetting;
+      queueButton.style.display = State.chatBusy ? "grid" : "none";
+      queueButton.disabled = resetting || stopping || desktopBusy;
+      send.disabled = stopping || resetting || (desktopBusy && !State.chatBusy);
       reset.disabled = resetting;
       microphone.disabled = !canListen || State.chatBusy;
       microphone.title = voiceMode || callActive ? "Stop voice" : voiceError || "Microphone";
@@ -388,7 +585,9 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       readAloud.title = voiceMode === "speak" ? "Stop speaking" : voiceError || "Read reply aloud";
       readAloud.setAttribute("aria-label", voiceMode === "speak" ? "Stop speaking" : "Read reply aloud");
       readAloud.classList.toggle("voice-active", voiceMode === "speak");
-      input.placeholder = State.chatHistory.length ? "Continue…" : "Ask me anything…";
+      input.placeholder = State.chatBusy ? "Queue another message…" : State.chatHistory.length ? "Continue…" : "Ask me anything…";
+      input.style.height = "18px";
+      input.style.height = `${Math.min(64, Math.max(18, input.scrollHeight))}px`;
     },
     focus() { if (!State.chatBusy) { input.focus(); input.select(); } },
   };

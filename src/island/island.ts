@@ -462,7 +462,10 @@ export class Island {
     const r = State.mode === "expanded" ? EXPANDED_CORNER : ROUNDED_CORNER;
     return {
       w: State.mode === "expanded" ? Math.min(State.settings.islandWidth, window.innerWidth) : w,
-      h: State.mode === "expanded" && State.view === "prompt" ? Math.min(State.settings.chatHeight, window.innerHeight) : h,
+      h: State.mode === "expanded" && State.view === "prompt"
+        ? Math.min(State.settings.chatHeight, window.innerHeight,
+          chatPromptHeight(State.chatHistory.length, State.settings.chatHeight)
+          + (State.quickActionsExpanded ? 110 : 0) + (State.toolActivityExpanded && State.toolActivity.length ? 70 : 0) + (State.promptQueue.length ? 50 : 0)) : h,
       r,
     };
   }

@@ -48,6 +48,12 @@ export interface MascotHandoff {
   status: "working" | "returning" | "error" | "cancelled";
 }
 
+export const QUICK_PROFILES = [
+  { id: "general", name: "General", prompt: "" },
+  { id: "coding", name: "Coding", prompt: "Help with programming. Explain concrete changes, preserve existing behavior, and distinguish verified results from suggestions." },
+  { id: "research", name: "Research", prompt: "Research questions using available web tools when relevant. Cite sources, distinguish evidence from inference, and state uncertainty." },
+];
+
 export type PromptContext =
   | { kind: "window"; appName: string; title: string; url?: string }
   | { kind: "file"; name: string; path?: string };
@@ -71,6 +77,8 @@ export interface Settings {
   chatTimeoutSeconds: number;
   chatBackend: "ollama" | "browser";
   browserModel: string;
+  agentProfile: string;
+  agentPrompt: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -94,6 +102,8 @@ export const DEFAULT_SETTINGS: Settings = {
   chatTimeoutSeconds: 120,
   chatBackend: "ollama",
   browserModel: "Llama-3.2-1B-Instruct-q4f16_1-MLC",
+  agentProfile: "general",
+  agentPrompt: "",
 };
 
 type Listener = () => void;
@@ -156,6 +166,10 @@ class AppState {
   savedChats: SavedChat[] = [];
   chatBusy = false;
   voiceBusy = false;
+  promptQueue: { id: string; text: string; file: { name: string; path: string } | null }[] = [];
+  toolActivity: { tool: string; phase: string; text: string }[] = [];
+  quickActionsExpanded = false;
+  toolActivityExpanded = false;
   chatStatus = "";
   chatRequestId: string | null = null;
   tokensPerSecond: number | null = null;

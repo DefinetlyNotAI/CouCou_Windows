@@ -39,6 +39,10 @@ pub struct Settings {
     pub chat_backend: String,
     #[serde(default = "default_browser_model")]
     pub browser_model: String,
+    #[serde(default = "default_agent_profile")]
+    pub agent_profile: String,
+    #[serde(default)]
+    pub agent_prompt: String,
 }
 
 fn enabled() -> bool {
@@ -54,6 +58,7 @@ fn default_chat_timeout() -> u64 {
 fn default_chat_backend() -> String {
     "ollama".into()
 }
+fn default_agent_profile() -> String { "general".into() }
 
 fn default_browser_model() -> String {
     "Llama-3.2-1B-Instruct-q4f16_1-MLC".into()
@@ -93,6 +98,8 @@ impl Default for Settings {
             chat_timeout_seconds: default_chat_timeout(),
             chat_backend: default_chat_backend(),
             browser_model: default_browser_model(),
+            agent_profile: default_agent_profile(),
+            agent_prompt: String::new(),
         }
     }
 }
@@ -131,6 +138,8 @@ mod tests {
         old.as_object_mut().unwrap().remove("islandWidth");
         old.as_object_mut().unwrap().remove("chatHeight");
         old.as_object_mut().unwrap().remove("islandPosition");
+        old.as_object_mut().unwrap().remove("agentProfile");
+        old.as_object_mut().unwrap().remove("agentPrompt");
         old["activeIntegrations"] = serde_json::json!(["retired-integration"]);
         old["soundVolume"] = serde_json::json!(0.08);
         let settings: super::Settings = serde_json::from_value(old).unwrap();
@@ -142,5 +151,7 @@ mod tests {
         assert_eq!(settings.island_width, 640.0);
         assert_eq!(settings.chat_height, 300.0);
         assert_eq!(settings.island_position, 0.5);
+        assert_eq!(settings.agent_profile, "general");
+        assert!(settings.agent_prompt.is_empty());
     }
 }

@@ -21,6 +21,7 @@
       <button id="fail">Fail</button>
       <button id="compact">Compact / expand</button>
       <button id="sample">Sample conversation</button>
+      <button id="busy">Toggle busy state</button>
     </div>
     <script type="module">
       import "../src/style.css";
@@ -36,6 +37,8 @@
       for (const button of document.querySelectorAll("[data-actor]")) {
         button.addEventListener("click", () => {
           State.startHandoff({ id: `preview:${button.dataset.actor}`, name: button.dataset.actor, color: button.dataset.color, kind: button.dataset.kind });
+          State.toolActivity.push({ tool: button.dataset.actor, phase: "tool-start", text: `Calling ${button.dataset.actor} (development UI simulation)` });
+          State.notify();
         });
       }
       document.getElementById("deliver").onclick = () => {
@@ -56,6 +59,11 @@
         State.promptContext = { kind: "file", name: "notes.txt", path: "preview/notes.txt" };
         State.notify();
         island.setView("prompt");
+      };
+      document.getElementById("busy").onclick = () => {
+        State.chatBusy = !State.chatBusy;
+        State.chatStatus = State.chatBusy ? "Generating reply… (development UI simulation)" : "";
+        State.notify();
       };
     </script>
   </body>

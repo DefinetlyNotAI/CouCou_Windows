@@ -2,6 +2,7 @@
 
 mod ollama;
 mod voice;
+mod desktop;
 mod files;
 mod island;
 mod integrations;
@@ -233,6 +234,11 @@ fn running_apps() -> Vec<platform::RunningApp> {
 }
 
 #[tauri::command]
+async fn desktop_action(app: AppHandle, mode: String, text: String) -> Result<serde_json::Value, String> {
+    desktop::action(app, mode, text).await
+}
+
+#[tauri::command]
 fn monitors(app: AppHandle) -> Result<Vec<(String, String)>, String> {
     Ok(app.available_monitors().map_err(|error| error.to_string())?.into_iter().filter_map(|monitor| {
         let name = monitor.name()?.clone();
@@ -395,6 +401,7 @@ pub fn run() {
             browser_tool,
             browser_context,
             running_apps,
+            desktop_action,
             monitors,
             choose_file,
             ingest_file,

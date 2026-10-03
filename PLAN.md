@@ -1,6 +1,6 @@
 # CouCou implementation plan
 
-Status: stage 1 implemented; native runtime verification remains partial as recorded below. Stage 2 is next. Preserve the full 20-stage scope and one implementation commit per stage.
+Status: stages 1–2 implemented; runtime verification remains partial as recorded below. Stage 3 is next. Preserve the full 20-stage scope and one implementation commit per stage.
 
 Stage 1 changes implemented so far: sanitized Markdown, scroll-position preservation during generation, removable attachments, uploads without chat reset, attachment context on later turns, removal of the 200 KB text cap, compact service mascots, chat-only TPS, 0–100% audio volume, exact island bounds for drag entry, native file picker, running-app picker, mascot hover-animation wake-up, and locally saved chats that reopen from recent activity with conversation text restored to either backend.
 
@@ -12,7 +12,11 @@ Fullscreen and placement: implemented a native Windows fullscreen toggle, Escape
 
 Voice: implemented native Windows dictation, read-aloud, and a listen/send/speak call loop using installed System.Speech engines. Text is passed as JSON over standard input to a fixed script. Recognition/playback have cancellation and timeouts; leaving chat/minimizing ends voice; playback respects mute/volume. This PC has en-US/en-GB recognizers and David/Hazel/Zira voices. Live microphone transcription, speaker playback, and the complete voice-to-model call journey remain unverified. Browser previews show these controls disabled rather than simulating native audio.
 
-Stages 2–20 remain pending. Native runtime checks listed above remain part of the full-goal verification scope; the implementation commit does not claim those checks passed. The existing release installer predates these changes and needs rebuilding before delivery.
+Stage 2: added in-island model refresh/selection, initial General/Coding/Research profile selection that updates the system prompt in both backends, recent-chat selection, queued prompts with removal/retry and ordered processing, multiline input, browser web search, native screen capture, clipboard text/image paste, reply copy, current service tasks, and expandable tool activity. Existing upload, stop, Settings, and fullscreen controls remain directly accessible. Quick actions and tool activity open one at a time; the composer stays visible; the island grows when conversation or expanded controls need space. Full stored agent profiles remain stage 4 scope.
+
+Stage 2 verification: frontend production build and existing native/JavaScript tests pass. The native streamed HTTP journey verifies profile instructions reach the model. Browser checks verified profile selection, busy-state queuing, queued-message retention after backend failure, expandable tool activity, and composer bounds. Native desktop script syntax was checked without accessing the clipboard or screen. Actual screenshot/clipboard operations, installed-model switching in the native UI, and successful multi-message queue delivery remain unverified.
+
+Stages 3–20 remain pending. Runtime checks listed above remain part of the full-goal verification scope; implementation commits do not claim those checks passed. The existing release installer predates these changes and needs rebuilding before delivery.
 
 ---
 
