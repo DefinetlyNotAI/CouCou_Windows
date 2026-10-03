@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>CouCou — mascot handoff preview</title>
+    <style>
+      #preview-controls { position: fixed; top: 350px; left: 30px; display: flex; flex-wrap: wrap; gap: 8px; max-width: 640px; font: 12px system-ui; }
+      #preview-controls p { flex-basis: 100%; color: #9398a1; }
+      #preview-controls button { padding: 6px 10px; background: #1d1f23; color: #f5f6f8; border: 1px solid #34363c; border-radius: 5px; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="preview-controls">
+      <p>Development UI simulation. These controls do not call services, generate replies, or spawn agents.</p>
+      <button data-actor="GitHub" data-color="#F4505E" data-kind="service">GitHub handoff</button>
+      <button data-actor="Vercel" data-color="#7C5CFF" data-kind="service">Vercel handoff</button>
+      <button data-actor="Files MCP" data-color="#38BDF8" data-kind="mcp">MCP handoff</button>
+      <button data-actor="Researcher" data-color="#2EC4A0" data-kind="agent">Subagent handoff</button>
+      <button id="deliver">Deliver results</button>
+      <button id="fail">Fail</button>
+      <button id="compact">Compact / expand</button>
+      <button id="sample">Sample conversation</button>
+    </div>
+    <script type="module">
+      import "../src/style.css";
+      import { State } from "../src/core/state.ts";
+      import { Island } from "../src/island/island.ts";
+      if (!import.meta.env.DEV) throw new Error("Animation preview is development-only.");
+      State.settings.soundEnabled = false;
+      State.loadIntegrationTasks();
+      const island = new Island(document.getElementById("root"));
+      island.fsm.pinned = true;
+      island.fsm.forceHome();
+      island.setView("prompt");
+      for (const button of document.querySelectorAll("[data-actor]")) {
+        button.addEventListener("click", () => {
+          State.startHandoff({ id: `preview:${button.dataset.actor}`, name: button.dataset.actor, color: button.dataset.color, kind: button.dataset.kind });
+        });
+      }
+      document.getElementById("deliver").onclick = () => {
+        for (const item of [...State.handoffs]) State.finishHandoff(item.id);
+      };
+      document.getElementById("fail").onclick = () => State.endHandoffs("preview", false);
+      document.getElementById("compact").onclick = () => {
+        if (State.mode === "compact") { island.fsm.forceHome(); island.setView("prompt"); }
+        else island.fsm.forcePetit();
+      };
+      document.getElementById("sample").onclick = () => {
+        State.chatHistory = [
+          { id: 1, role: "user", content: "Show a Markdown example" },
+          { id: 2, role: "assistant", content: "## Local chat\n\n**Bold**, *italic*, and `inline code`.\n\n- One\n- Two\n\n| Tool | Status |\n| --- | --- |\n| GitHub | Ready |\n\n```ts\nconst message = 'hello';\n```\n\n[Source](https://example.com)\n\n<script>alert('unsafe')</" + "script>" },
+          ...Array.from({ length: 10 }, (_, index) => ({ id: index + 3, role: index % 2 ? "assistant" : "user", content: `Earlier message ${index + 1}` })),
+        ];
+        State.droppedFile = { name: "notes.txt", path: "preview/notes.txt" };
+        State.promptContext = { kind: "file", name: "notes.txt", path: "preview/notes.txt" };
+        State.notify();
+        island.setView("prompt");
+      };
+    </script>
+  </body>
+</html>

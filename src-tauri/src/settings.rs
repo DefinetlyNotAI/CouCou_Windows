@@ -15,6 +15,12 @@ pub struct Settings {
     pub active_integrations: Vec<String>,
     /// "primary" = the main display, "cursor" = whichever display the mouse is on.
     pub screen: String,
+    #[serde(default = "default_island_width")]
+    pub island_width: f64,
+    #[serde(default = "default_chat_height")]
+    pub chat_height: f64,
+    #[serde(default = "default_island_position")]
+    pub island_position: f64,
     pub autostart: bool,
     #[serde(default)]
     pub hidden_programs: Vec<String>,
@@ -38,6 +44,9 @@ pub struct Settings {
 fn enabled() -> bool {
     true
 }
+fn default_island_width() -> f64 { 640.0 }
+fn default_chat_height() -> f64 { 300.0 }
+fn default_island_position() -> f64 { 0.5 }
 fn default_chat_timeout() -> u64 {
     120
 }
@@ -72,6 +81,9 @@ impl Default for Settings {
             absence_interval: 180.0,
             active_integrations: default_active_integrations(),
             screen: "primary".into(),
+            island_width: default_island_width(),
+            chat_height: default_chat_height(),
+            island_position: default_island_position(),
             autostart: false,
             hidden_programs: Vec::new(),
             ollama_url: default_ollama_url(),
@@ -116,6 +128,9 @@ mod tests {
         old.as_object_mut().unwrap().remove("toolsEnabled");
         old.as_object_mut().unwrap().remove("webSearchEnabled");
         old.as_object_mut().unwrap().remove("chatTimeoutSeconds");
+        old.as_object_mut().unwrap().remove("islandWidth");
+        old.as_object_mut().unwrap().remove("chatHeight");
+        old.as_object_mut().unwrap().remove("islandPosition");
         old["activeIntegrations"] = serde_json::json!(["retired-integration"]);
         old["soundVolume"] = serde_json::json!(0.08);
         let settings: super::Settings = serde_json::from_value(old).unwrap();
@@ -124,5 +139,8 @@ mod tests {
         assert_eq!(settings.sound_volume, 0.08);
         assert!(settings.tools_enabled);
         assert_eq!(settings.chat_timeout_seconds, 120);
+        assert_eq!(settings.island_width, 640.0);
+        assert_eq!(settings.chat_height, 300.0);
+        assert_eq!(settings.island_position, 0.5);
     }
 }

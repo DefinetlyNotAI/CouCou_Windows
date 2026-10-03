@@ -33,6 +33,21 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface SavedChat {
+  id: string;
+  title: string;
+  updatedAt: number;
+  messages: ChatMessage[];
+}
+
+export interface MascotHandoff {
+  id: string;
+  name: string;
+  color: string;
+  kind: "tool" | "service" | "mcp" | "agent";
+  status: "working" | "returning" | "error" | "cancelled";
+}
+
 export type PromptContext =
   | { kind: "window"; appName: string; title: string; url?: string }
   | { kind: "file"; name: string; path?: string };
@@ -43,7 +58,10 @@ export interface Settings {
   autoCloseInterval: number;
   absenceInterval: number;
   activeIntegrations: string[];
-  screen: "primary" | "cursor";
+  screen: string;
+  islandWidth: number;
+  chatHeight: number;
+  islandPosition: number;
   autostart: boolean;
   hiddenPrograms: string[];
   ollamaUrl: string;
@@ -64,6 +82,9 @@ export const DEFAULT_SETTINGS: Settings = {
     "integration_resend", "integration_n8n", "integration_vercel", "integration_github",
   ],
   screen: "primary",
+  islandWidth: 640,
+  chatHeight: 300,
+  islandPosition: 0.5,
   autostart: false,
   hiddenPrograms: [],
   ollamaUrl: "http://127.0.0.1:11434",
@@ -106,6 +127,7 @@ export const INTEGRATION_AGENTS: AgentTask[] = [
 
 class AppState {
   mode: IslandMode = "hidden";
+  fullscreen = false;
   view: IslandViewName = "overview";
 
   tasks: AgentTask[] = [ollamaTask()];
@@ -130,10 +152,15 @@ class AppState {
   droppedFile: { name: string; path: string } | null = null;
   noteMessage: string | null = null;
   chatHistory: ChatMessage[] = [];
+  chatId: string = crypto.randomUUID();
+  savedChats: SavedChat[] = [];
   chatBusy = false;
+  voiceBusy = false;
   chatStatus = "";
   chatRequestId: string | null = null;
   tokensPerSecond: number | null = null;
+  handoffs: MascotHandoff[] = [];
+  private handoffTimers = new Map<string, number>();
 
   lastActivity = performance.now();
 
@@ -149,6 +176,54 @@ class AppState {
   /** Marks the UI dirty; the island re-renders on the next frame. */
   notify() {
     for (const fn of this.listeners) fn();
+  }
+
+  loadChats() {
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem("coucou.chats") || "[]");
+      if (Array.isArray(value)) this.savedChats = value.filter((chat): chat is SavedChat =>
+        chat && typeof chat.id === "string" && typeof chat.title === "string" && typeof chat.updatedAt === "number" &&
+        Array.isArray(chat.messages) && chat.messages.every((message: ChatMessage) =>
+          typeof message.id === "number" && (message.role === "user" || message.role === "assistant") && typeof message.content === "string"));
+    } catch { this.savedChats = []; }
+  }
+
+  saveChat() {
+    if (!this.chatHistory.length) return;
+    const title = this.chatHistory.find(message => message.role === "user")?.content.slice(0, 80) || "Chat";
+    const chat = { id: this.chatId, title, updatedAt: Date.now(), messages: this.chatHistory.map(message => ({ ...message })) };
+    this.savedChats = [chat, ...this.savedChats.filter(item => item.id !== chat.id)];
+    try { localStorage.setItem("coucou.chats", JSON.stringify(this.savedChats)); }
+    catch { this.chatStatus = "Chat storage is full. This conversation could not be saved."; }
+  }
+
+  startHandoff(handoff: Omit<MascotHandoff, "status">) {
+    const timer = this.handoffTimers.get(handoff.id);
+    if (timer != null) window.clearTimeout(timer);
+    this.handoffTimers.delete(handoff.id);
+    this.handoffs = this.handoffs.filter(item => item.id !== handoff.id);
+    this.handoffs.push({ ...handoff, status: "working" });
+    this.notify();
+  }
+
+  finishHandoff(id: string, status: Exclude<MascotHandoff["status"], "working"> = "returning") {
+    const item = this.handoffs.find(handoff => handoff.id === id);
+    if (!item) return;
+    item.status = status;
+    const previous = this.handoffTimers.get(id);
+    if (previous != null) window.clearTimeout(previous);
+    this.handoffTimers.set(id, window.setTimeout(() => {
+      this.handoffTimers.delete(id);
+      this.handoffs = this.handoffs.filter(handoff => handoff !== item);
+      this.notify();
+    }, 2400));
+    this.notify();
+  }
+
+  endHandoffs(requestId: string, cancelled: boolean) {
+    for (const item of this.handoffs.filter(handoff => handoff.id.startsWith(`${requestId}:`) && handoff.status === "working")) {
+      this.finishHandoff(item.id, cancelled ? "cancelled" : "error");
+    }
   }
 
   get focusTask(): AgentTask | null {

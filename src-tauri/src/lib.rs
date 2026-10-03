@@ -1,6 +1,7 @@
 // Coucou for Windows — app wiring and the commands the island calls.
 
 mod ollama;
+mod voice;
 mod files;
 mod island;
 mod integrations;
@@ -33,8 +34,7 @@ pub struct BootInfo {
     settings: Settings,
     screen: ScreenInfo,
     version: String,
-    /// False where the OS has no global cursor (Wayland): the page then reports
-    /// the cursor from its own mouse events.
+    /// Whether the native app supplies global cursor events.
     cursor_poll: bool,
 }
 
@@ -55,7 +55,8 @@ fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) -> R
     settings::save(&settings).map_err(|e| format!("Could not save settings: {e}"))?;
     let (screen_changed, autostart_changed) = {
         let mut current = shared.settings.lock().unwrap();
-        let screen_changed = current.screen != settings.screen;
+        let screen_changed = current.screen != settings.screen || current.island_width != settings.island_width
+            || current.chat_height != settings.chat_height || current.island_position != settings.island_position;
         let autostart_changed = current.autostart != settings.autostart;
         *current = settings.clone();
         (screen_changed, autostart_changed)
@@ -84,6 +85,11 @@ fn set_collapsed(app: AppHandle, shared: State<Shared>, collapsed: bool) {
     shared.gate.collapsed.store(collapsed, Ordering::Relaxed);
     island::apply_geometry(&app, &pref, collapsed);
     // The wake strip must always take the mouse, and a resize invalidates the flag.
+    if shared.gate.fullscreen.load(Ordering::Relaxed) {
+        if let Some(win) = island::window(&app) {
+            if collapsed { let _ = win.hide(); } else { let _ = win.show(); }
+        }
+    }
     island::refresh_click_through(&app, &shared.gate);
     shared.gate.set_active(!collapsed);
 }
@@ -185,6 +191,61 @@ async fn browser_tool(shared: State<'_, Shared>, name: String, arguments: serde_
 #[tauri::command]
 fn browser_context(context: ChatContext) -> Result<String, String> {
     ollama::browser_context(context)
+}
+
+#[tauri::command]
+async fn voice_run(voice: State<'_, voice::Voice>, request_id: String, mode: String, text: String, volume: u8) -> Result<serde_json::Value, String> {
+    voice.run(request_id, &mode, text, volume).await
+}
+
+#[tauri::command]
+fn voice_cancel(voice: State<'_, voice::Voice>, request_id: String) {
+    voice.cancel(&request_id);
+}
+
+#[tauri::command]
+fn set_fullscreen(app: AppHandle, shared: State<Shared>, enabled: bool) -> Result<(), String> {
+    let win = island::window(&app).ok_or("Island window is unavailable")?;
+    win.set_fullscreen(enabled).map_err(|error| error.to_string())?;
+    shared.gate.fullscreen.store(enabled, Ordering::Relaxed);
+    shared.gate.collapsed.store(false, Ordering::Relaxed);
+    shared.gate.set_active(true);
+    platform::set_activating(&win, enabled);
+    if enabled {
+        win.set_ignore_cursor_events(false).map_err(|error| error.to_string())?;
+        let _ = win.set_focus();
+    } else {
+        let pref = shared.settings.lock().unwrap().screen.clone();
+        island::apply_geometry(&app, &pref, false);
+    }
+    island::refresh_click_through(&app, &shared.gate);
+    Ok(())
+}
+
+#[tauri::command]
+async fn chat_restore(chat: State<'_, Chat>, messages: Vec<serde_json::Value>) -> Result<(), String> {
+    chat.restore(messages).await
+}
+
+#[tauri::command]
+fn running_apps() -> Vec<platform::RunningApp> {
+    platform::running_apps()
+}
+
+#[tauri::command]
+fn monitors(app: AppHandle) -> Result<Vec<(String, String)>, String> {
+    Ok(app.available_monitors().map_err(|error| error.to_string())?.into_iter().filter_map(|monitor| {
+        let name = monitor.name()?.clone();
+        Some((format!("monitor:{name}"), format!("{name} · {} × {}", monitor.size().width, monitor.size().height)))
+    }).collect())
+}
+
+#[tauri::command]
+async fn choose_file(app: AppHandle) -> Result<Option<DroppedFile>, String> {
+    let win = island::window(&app).ok_or("Island window is unavailable")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        platform::choose_file(&win)?.map(|path| files::ingest(&path)).transpose()
+    }).await.map_err(|e| e.to_string())?
 }
 
 /// Copies a dropped file into the inbox and reports its name back.
@@ -309,6 +370,7 @@ pub fn run() {
             gate: gate.clone(),
         })
         .manage(Chat::default())
+        .manage(voice::Voice::default())
         .invoke_handler(tauri::generate_handler![
             boot,
             save_settings,
@@ -316,18 +378,25 @@ pub fn run() {
             set_island_rect,
             focus_window,
             reposition,
+            set_fullscreen,
             open_url,
             quit_app,
             set_paused,
             log_line,
             chat_send,
             chat_reset,
+            chat_restore,
             chat_cancel,
+            voice_run,
+            voice_cancel,
             ollama_models,
             ollama_model_info,
             browser_tools,
             browser_tool,
             browser_context,
+            running_apps,
+            monitors,
+            choose_file,
             ingest_file,
             secret_present,
             secret_set,

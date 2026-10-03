@@ -14,7 +14,7 @@ interface MiniBot {
 const live = new Map<HTMLCanvasElement, MiniBot>();
 
 
-export function createMiniBot(task: AgentTask, bodySize: number): HTMLElement {
+export function createMiniBot(task: AgentTask, bodySize: number, facing?: { x: number; y: number }): HTMLElement {
   const slot = document.createElement("span");
   slot.className = "mini";
   slot.style.width = `${bodySize}px`;
@@ -30,7 +30,8 @@ export function createMiniBot(task: AgentTask, bodySize: number): HTMLElement {
   slot.append(canvas);
 
   const engine = new BotEngine();
-  engine.isMini = true;
+  engine.isMini = !facing;
+  if (facing) { engine.lookX = facing.x; engine.lookY = facing.y; }
   engine.bodyColor = hexToRGB(task.color);
   engine.setState(task.state, true);
   if (task.emote) engine.setPermanentEmote(task.emote);

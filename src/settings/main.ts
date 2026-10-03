@@ -421,7 +421,7 @@ function integrationsSection(present: Record<string, boolean>): HTMLElement {
 
 function generalSection(): HTMLElement {
   const volume = h("input", {
-    type: "range", min: "0", max: "0.2", step: "0.005", value: String(settings.soundVolume),
+    type: "range", min: "0", max: "1", step: "0.01", value: String(settings.soundVolume),
     "aria-label": "Sound volume",
   }) as HTMLInputElement;
   volume.addEventListener("change", () => {
@@ -439,12 +439,17 @@ function generalSection(): HTMLElement {
     void save();
   });
 
-  const screen = h("select", {}) as HTMLSelectElement;
+  const screen = h("select", { "aria-label": "Island display" }) as HTMLSelectElement;
   screen.append(
     h("option", { value: "primary", text: "Main display" }),
     h("option", { value: "cursor", text: "Display under the cursor" }),
   );
   screen.value = settings.screen;
+  void Bridge.monitors().then(monitors => {
+    for (const [id, name] of monitors) screen.append(h("option", { value: id, text: name }));
+    screen.value = settings.screen;
+    if (!screen.value) screen.value = "primary";
+  }).catch(() => {});
   screen.addEventListener("change", () => {
     settings.screen = screen.value as Settings["screen"];
     void save();
@@ -466,6 +471,36 @@ function generalSection(): HTMLElement {
     void save();
   });
 
+  function placementControl(label: string, key: "islandWidth" | "chatHeight" | "islandPosition", min: number, max: number, step: number) {
+    const input = h("input", { type: "range", min: String(min), max: String(max), step: String(step),
+      value: String(settings[key]), "aria-label": label }) as HTMLInputElement;
+    const value = h("span", { class: "hint" });
+    const update = () => { value.textContent = key === "islandPosition" ? `${Math.round(Number(input.value) * 100)}%` : `${input.value}px`; };
+    update();
+    input.addEventListener("input", update);
+    input.addEventListener("change", () => { settings[key] = Number(input.value); void save(); });
+    return h("div", { class: "row" }, h("label", { text: label }), input, value);
+  }
+
+  const runningApps = h("select", { "aria-label": "Currently running applications" }) as HTMLSelectElement;
+  const pickerStatus = h("span", { class: "hint" });
+  async function refreshRunningApps() {
+    try {
+      const apps = await Bridge.runningApps();
+      runningApps.replaceChildren(h("option", { value: "", text: "Choose a running app…" }), ...apps.map(app =>
+        h("option", { value: app.executable, text: `${app.executable} — ${app.title}` })));
+      pickerStatus.textContent = apps.length ? "" : "No running applications found.";
+    } catch (error) { pickerStatus.textContent = String(error).replace(/^Error:\s*/, ""); }
+  }
+  runningApps.addEventListener("change", () => {
+    if (!runningApps.value) return;
+    settings.hiddenPrograms = [...new Set([...settings.hiddenPrograms, runningApps.value.toLowerCase()])];
+    hiddenPrograms.value = settings.hiddenPrograms.join("\n");
+    void save();
+    runningApps.value = "";
+  });
+  void refreshRunningApps();
+
   return h(
     "section",
     {},
@@ -481,12 +516,17 @@ function generalSection(): HTMLElement {
       h("span", { class: "hint", text: "seconds after you leave the island" }),
     ),
     h("div", { class: "row" }, h("label", { text: "Island lives on" }), screen),
+    placementControl("Island width", "islandWidth", 640, 1200, 20),
+    placementControl("Chat height", "chatHeight", 240, 800, 20),
+    placementControl("Horizontal position", "islandPosition", 0, 1, 0.01),
     h("div", { class: "row" },
       h("label", { text: "Launch at startup" }),
       toggle(settings.autostart, (value) => { settings.autostart = value; void save(); }),
     ),
     h("div", { style: "display:flex;flex-direction:column;gap:6px" },
       h("label", { text: "Hide at the screen edge for these programs" }),
+      h("div", { class: "row" }, runningApps, h("button", { text: "Refresh", onclick: () => void refreshRunningApps() })),
+      pickerStatus,
       hiddenPrograms,
       h("div", { class: "hint", text: "Enter executable names, one per line. Names match case-insensitively." }),
     ),

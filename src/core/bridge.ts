@@ -25,11 +25,14 @@ export interface BootInfo {
   /** Logical screen rect of the monitor the island lives on. */
   screen: { x: number; y: number; width: number; height: number; scale: number };
   version: string;
-  /** False where the OS has no global cursor (Wayland): see Island.followPageCursor. */
+  /** Whether the native app supplies global cursor events. */
   cursorPoll: boolean;
 }
 
 export const Bridge = {
+  runningApps: () => callOrThrow<{ executable: string; title: string }[]>("running_apps"),
+  monitors: () => callOrThrow<[string, string][]>("monitors"),
+  chooseFile: () => callOrThrow<DroppedFile | null>("choose_file"),
   boot: () => call<BootInfo>("boot"),
 
   saveSettings: (settings: Settings) => callOrThrow<void>("save_settings", { settings }),
@@ -48,6 +51,7 @@ export const Bridge = {
   focusWindow: (focused: boolean) => call<void>("focus_window", { focused }),
 
   reposition: () => call<void>("reposition"),
+  setFullscreen: (enabled: boolean) => callOrThrow<void>("set_fullscreen", { enabled }),
 
   openUrl: (url: string) => call<void>("open_url", { url }),
 
@@ -63,6 +67,9 @@ export const Bridge = {
   chatSend: (requestId: string, query: string, context: ChatContext | null) =>
     callOrThrow<{ text: string; sources: ChatSource[] }>("chat_send", { requestId, query, context }),
   chatCancel: (requestId: string) => call<void>("chat_cancel", { requestId }),
+  voiceRun: (requestId: string, mode: "capabilities" | "listen" | "speak", text = "", volume = 100) =>
+    callOrThrow<{ text?: string; voices?: string[]; languages?: string[] }>("voice_run", { requestId, mode, text, volume }),
+  voiceCancel: (requestId: string) => call<void>("voice_cancel", { requestId }),
   ollamaModels: (url: string) => callOrThrow<string[]>("ollama_models", { url }),
   ollamaModelInfo: (url: string, model: string) => callOrThrow<{ tools: boolean; vision: boolean; thinking: boolean }>("ollama_model_info", { url, model }),
   browserTools: () => callOrThrow<unknown[]>("browser_tools"),
@@ -70,6 +77,7 @@ export const Bridge = {
     callOrThrow<{ content: string; sources: ChatSource[] }>("browser_tool", { name, arguments: input }),
   browserContext: (context: ChatContext) => callOrThrow<string>("browser_context", { context }),
   chatReset: () => call<void>("chat_reset"),
+  chatRestore: (messages: { role: string; content: string }[]) => callOrThrow<void>("chat_restore", { messages }),
   /** Copies a dropped file into the inbox. */
   ingestFile: (path: string) => callOrThrow<DroppedFile>("ingest_file", { path }),
   /** Only ever tells you whether a key exists — never its value. */
@@ -124,7 +132,11 @@ export async function onEvent<T>(name: string, handler: (payload: T) => void) {
 }
 
 export interface ChatSource { title: string; url: string; }
-export interface ChatProgress { requestId: string; phase: string; text: string; tool: string | null; }
+export interface ChatProgress {
+  requestId: string; phase: string; text: string; tool: string | null;
+  callId?: string;
+  actor?: { name: string; kind: "tool" | "service" | "mcp" | "agent"; color?: string };
+}
 export interface IntegrationUpdate {
   id: string;
   data: Record<string, unknown>;

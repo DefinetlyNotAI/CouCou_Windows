@@ -4,13 +4,14 @@ import { h, svg, clear, dot } from "./dom";
 import { ICONS } from "./icons";
 import { State } from "../core/state";
 import { washRGBA, type IslandViewName, type Wash } from "../core/layout";
-import { buildPrompt } from "./chat";
+import { buildPrompt, reopenChat } from "./chat";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
 import { buildChoose, buildUpload, buildUploading } from "./upload";
 
 export interface ViewActions {
   setView(view: IslandViewName): void;
   minimize(): void;
+  toggleFullscreen(): void;
   toggleSound(): void;
   setVolume(value: number): void;
   setAutoClose(seconds: number): void;
@@ -51,6 +52,8 @@ export function buildHeader(actions: ViewActions): ViewHost {
     "aria-label": "Minimize",
     onclick: () => actions.minimize(),
   }, svg(ICONS.minimize, 14));
+  const fullscreenBtn = h("button", { title: "Fullscreen", "aria-label": "Fullscreen", onclick: () => actions.toggleFullscreen() },
+    svg("M4 9V4h5v2H6v3H4zm11-5h5v5h-2V6h-3V4zM4 15h2v3h3v2H4v-5zm14 0h2v5h-5v-2h3v-3z", 14));
 
   function go(view: IslandViewName) {
     if (view === "prompt") State.setFocus("integration_ollama");
@@ -62,13 +65,16 @@ export function buildHeader(actions: ViewActions): ViewHost {
     "div",
     { id: "header" },
     h("div", { class: "tabs" }, tabHome, tabChat, tabDrop),
-    h("div", { class: "header-actions" }, gearBtn, soundBtn, minimizeBtn),
+    h("div", { class: "header-actions" }, gearBtn, soundBtn, fullscreenBtn, minimizeBtn),
   );
 
   return {
     el,
     sync() {
       const view = State.view;
+      fullscreenBtn.title = State.fullscreen ? "Exit fullscreen" : "Fullscreen";
+      fullscreenBtn.setAttribute("aria-label", fullscreenBtn.title);
+      fullscreenBtn.setAttribute("aria-pressed", String(State.fullscreen));
       tabHome.classList.toggle("on", view === "overview" || view === "empty");
       tabChat.classList.toggle("on", view === "prompt");
       tabDrop.classList.toggle("on", view === "upload");
@@ -167,15 +173,23 @@ function buildOverview(actions: ViewActions): ViewHost {
           : task?.state ?? "Ready";
 
       const steps = task?.steps.slice(-3) ?? [];
-      const key = steps.join("\u0000");
+      const chats = provider === "integration_ollama" ? State.savedChats.slice(0, 8) : [];
+      const key = JSON.stringify([steps, chats.map(chat => [chat.id, chat.updatedAt]), State.chatBusy, State.voiceBusy]);
       if (key === lastActivity) return;
       lastActivity = key;
       clear(activity);
-      if (!steps.length) {
+      if (!steps.length && !chats.length) {
         activity.append(h("div", { class: "activity-empty", text: "No activity yet" }));
         return;
       }
       for (const step of steps) activity.append(h("div", { class: "activity-row", text: step }));
+      for (const chat of chats) {
+        const row = h("button", { class: "activity-row activity-chat", text: chat.title, title: chat.title,
+          onclick: async () => { if (await reopenChat(chat.id)) { State.setFocus("integration_ollama"); actions.setView("prompt"); } },
+        }) as HTMLButtonElement;
+        row.disabled = State.chatBusy || State.voiceBusy;
+        activity.append(row);
+      }
     },
   };
 }
@@ -218,7 +232,7 @@ function buildNote(): ViewHost {
 function buildSettings(actions: ViewActions): ViewHost {
   const soundSwitch = h("button", { class: "switch", "aria-label": "Toggle sound", onclick: () => actions.toggleSound() });
   const volume = h("input", {
-    type: "range", min: "0", max: "0.2", step: "0.005",
+    type: "range", min: "0", max: "1", step: "0.01",
     "aria-label": "Sound volume",
     oninput: (event: Event) => actions.setVolume(Number((event.target as HTMLInputElement).value)),
   }) as HTMLInputElement;

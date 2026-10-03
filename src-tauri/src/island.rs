@@ -59,6 +59,7 @@ pub struct PollGate {
     active: Mutex<bool>,
     cv: Condvar,
     pub collapsed: AtomicBool,
+    pub fullscreen: AtomicBool,
     pub rect: Mutex<IslandRect>,
     /// Mirrors the window flag so we only call into the OS when it changes.
     ignoring: AtomicBool,
@@ -70,6 +71,7 @@ impl PollGate {
             active: Mutex::new(false),
             cv: Condvar::new(),
             collapsed: AtomicBool::new(true),
+            fullscreen: AtomicBool::new(false),
             rect: Mutex::new(IslandRect::default()),
             ignoring: AtomicBool::new(false),
         }
@@ -127,6 +129,11 @@ fn monitor_contains(m: &Monitor, x: f64, y: f64) -> bool {
 /// The display the island lives on: the primary one, or the one under the cursor.
 fn target_monitor(app: &AppHandle, pref: &str) -> Option<Monitor> {
     let monitors = app.available_monitors().ok()?;
+    if let Some(name) = pref.strip_prefix("monitor:") {
+        if let Some(monitor) = monitors.iter().find(|monitor| monitor.name().is_some_and(|value| value == name)) {
+            return Some(monitor.clone());
+        }
+    }
     if pref == "cursor" {
         if let Some((cx, cy)) = cursor_physical() {
             if let Some(m) = monitors.iter().find(|m| monitor_contains(m, cx, cy)) {
@@ -160,6 +167,7 @@ pub fn screen_info(app: &AppHandle, pref: &str) -> ScreenInfo {
 
 /// Places and sizes the window. `collapsed` picks the wake strip instead of the panel.
 pub fn apply_geometry(app: &AppHandle, pref: &str, collapsed: bool) {
+    if app.try_state::<crate::Shared>().is_some_and(|state| state.gate.fullscreen.load(Ordering::Relaxed)) { return; }
     let Some(win) = window(app) else { return };
     let Some(m) = target_monitor(app, pref) else { return };
 
@@ -167,10 +175,14 @@ pub fn apply_geometry(app: &AppHandle, pref: &str, collapsed: bool) {
     let mp = *m.position();
     let ms = *m.size();
 
-    let (lw, lh) = if collapsed { (STRIP_W, STRIP_H) } else { (PANEL_W, PANEL_H) };
-    let pw = (lw * scale).round().max(1.0) as u32;
-    let ph = (lh * scale).round().max(1.0) as u32;
-    let x = mp.x + (ms.width as i32 - pw as i32) / 2;
+    let (panel_width, panel_height, position) = app.try_state::<crate::Shared>().map(|shared| {
+        let settings = shared.settings.lock().unwrap();
+        (settings.island_width.clamp(640.0, 1200.0) + 80.0, settings.chat_height.clamp(240.0, 800.0) + 20.0, settings.island_position.clamp(0.0, 1.0))
+    }).unwrap_or((PANEL_W, PANEL_H, 0.5));
+    let (lw, lh) = if collapsed { (STRIP_W, STRIP_H) } else { (panel_width, panel_height) };
+    let pw = ((lw * scale).round().max(1.0) as u32).min(ms.width);
+    let ph = ((lh * scale).round().max(1.0) as u32).min(ms.height);
+    let x = mp.x + ((ms.width - pw) as f64 * position).round() as i32;
     let y = mp.y;
 
     let _ = win.set_size(PhysicalSize::new(pw, ph));

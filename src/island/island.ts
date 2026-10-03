@@ -1,15 +1,14 @@
 
 import { Tracked, Spring, clamp } from "../core/anim";
 import { Bridge, IS_TAURI, onDragDrop } from "../core/bridge";
-import { BrowserAI } from "../core/browser-ai";
 import {
-  EXPANDED_CORNER, EXPANDED_W, NOTCH_W, PANEL_H, PANEL_W,
+  EXPANDED_CORNER, EXPANDED_W, NOTCH_W,
   ROUNDED_CORNER, VIEW_LAYOUTS, botGlowColor, botGlowOpacity, botPosition, chatPromptHeight,
   islandSize,
   type IslandMode, type IslandViewName,
 } from "../core/layout";
 import { Sound } from "../core/sound";
-import { State } from "../core/state";
+import { State, type AgentTask } from "../core/state";
 import { BotEngine, hexToRGB } from "../mochi/engine";
 import { Greeting } from "../mochi/greeting";
 import { UploadCanvas } from "../upload/canvas";
@@ -17,6 +16,7 @@ import { USC, UploadSeq } from "../upload/sequence";
 import { buildHeader, buildViews, type ViewActions, type ViewHost } from "../views/views";
 import { h } from "../views/dom";
 import { IslandStateMachine } from "./fsm";
+import { createMiniBot, pruneMiniBots, syncMiniBotStates, tickMiniBots } from "../mochi/minibots";
 
 const BOT_OVERHANG = 40;
 /** Same margin as the Rust hit test (src-tauri/src/island.rs). */
@@ -41,6 +41,12 @@ export class Island {
   private botCanvas!: HTMLCanvasElement;
   private botGlow!: HTMLElement;
   private botMetrics!: HTMLElement;
+  private compactServices!: HTMLElement;
+  private compactServicesKey = "";
+  private handoffScene!: HTMLElement;
+  private handoffSceneKey = "";
+  private handoffTasks: AgentTask[] = [];
+  private fileDragging = false;
   private greetingCanvas!: HTMLCanvasElement;
   private countdown!: HTMLElement;
   private wakeStrip!: HTMLElement;
@@ -76,7 +82,7 @@ export class Island {
   // Bot hover → love (IslandWindowController.botHoverIn)
   private botHovering = false;
   private botHoverTimer: number | null = null;
-  private lastLoveTime = 0;
+  private lastLoveTime = -Infinity;
   private botHoverStart = { x: 0, y: 0 };
 
   private confusedRecovery: number | null = null;
@@ -106,6 +112,7 @@ export class Island {
     const actions: ViewActions = {
       setView: (v) => this.setView(v),
       minimize: () => this.minimize(),
+      toggleFullscreen: () => void this.toggleFullscreen(),
       toggleSound: () => {
         State.settings.soundEnabled = !State.settings.soundEnabled;
         Sound.setEnabled(State.settings.soundEnabled);
@@ -274,6 +281,8 @@ export class Island {
   }
 
   collapse() {
+    if (this.fullscreenChanging) return;
+    if (State.fullscreen) { void this.toggleFullscreen().then(() => { if (!State.fullscreen) this.collapse(); }); return; }
     State.isPinned = false;
     this.fsm.pinned = false;
     // Drive the state machine rather than the mode: setting the mode behind its
@@ -286,9 +295,39 @@ export class Island {
     this.collapse();
   }
 
+  private fullscreenChanging = false;
+  private pinBeforeFullscreen = false;
+  async toggleFullscreen() {
+    if (this.fullscreenChanging) return;
+    this.fullscreenChanging = true;
+    const enabled = !State.fullscreen;
+    const view = State.view;
+    try {
+      if (IS_TAURI) await Bridge.setFullscreen(enabled);
+      State.fullscreen = enabled;
+      if (enabled) this.pinBeforeFullscreen = State.isPinned;
+      State.isPinned = enabled || this.pinBeforeFullscreen;
+      this.fsm.pinned = State.isPinned;
+      this.fsm.forceHome();
+      State.view = view;
+      this.root.classList.toggle("fullscreen", enabled);
+      this.animateGeometry(false);
+      State.notify();
+    } catch (error) {
+      State.chatStatus = String(error).replace(/^Error:\s*/, "");
+      State.notify();
+    } finally { this.fullscreenChanging = false; }
+  }
+
   setVisibilityBlocked(blocked: boolean) {
+    const wasBlocked = this.visibilityBlocked;
     this.visibilityBlocked = blocked;
     this.fsm.setBlocked(blocked);
+    if (wasBlocked && !blocked && State.fullscreen) {
+      const view = State.view;
+      this.fsm.forceHome();
+      this.setView(view);
+    }
   }
 
   /** Open a view directly from an app action, such as the tray or file drop. */
@@ -316,6 +355,10 @@ export class Island {
     switch (e.type) {
       case "enter":
       case "over": {
+        this.fileDragging = true;
+        const rect = this.islandRect();
+        const mouse = State.mouse;
+        if (mouse.x < rect.x || mouse.x > rect.x + rect.w || mouse.y < rect.y || mouse.y > rect.y + rect.h) return;
         if (State.fileDragOver) return;
         State.fileDragOver = true;
         this.engine.animateMorph(1);
@@ -326,6 +369,7 @@ export class Island {
         break;
       }
       case "leave": {
+        this.fileDragging = false;
         if (!State.fileDragOver) return;
         State.fileDragOver = false;
         this.engine.animateMorph(0);
@@ -335,6 +379,7 @@ export class Island {
         break;
       }
       case "drop": {
+        this.fileDragging = false;
         State.fileDragOver = false;
         const path = e.paths?.[0];
         if (!path) {
@@ -353,26 +398,6 @@ export class Island {
     const name = path.split(/[\\/]/).pop() || "file";
     State.droppedFile = { name, path };
     State.promptContext = { kind: "file", name, path };
-    State.chatHistory = [];
-    const requestId = State.chatRequestId;
-    State.chatRequestId = null;
-    State.chatBusy = false;
-    State.chatStatus = "";
-    State.tokensPerSecond = null;
-    State.stateOverride = null;
-    void (async () => {
-      if (requestId) {
-        try {
-          await Bridge.chatCancel(requestId);
-          await BrowserAI.cancel(requestId);
-        } catch (error) {
-          void Bridge.log(`could not cancel chat request ${requestId}: ${String(error)}`);
-        }
-      }
-      await Bridge.chatReset();
-      await BrowserAI.reset();
-    })();
-
     UploadSeq.performDrop(State.uploadDuration);
     this.uploadTens = 0;
     this.uploadDone = false;
@@ -432,9 +457,14 @@ export class Island {
   // ── Geometry ────────────────────────────────────────────────────────────────
 
   private targetSize(): { w: number; h: number; r: number } {
+    if (State.fullscreen) return { w: window.innerWidth, h: State.mode === "hidden" ? 0 : window.innerHeight, r: 0 };
     const { w, h } = islandSize(State.mode, State.view, State.chatHistory.length);
     const r = State.mode === "expanded" ? EXPANDED_CORNER : ROUNDED_CORNER;
-    return { w, h, r };
+    return {
+      w: State.mode === "expanded" ? Math.min(State.settings.islandWidth, window.innerWidth) : w,
+      h: State.mode === "expanded" && State.view === "prompt" ? Math.min(State.settings.chatHeight, window.innerHeight) : h,
+      r,
+    };
   }
 
   private animateGeometry(shrinking: boolean) {
@@ -464,7 +494,7 @@ export class Island {
     this.greetingCanvas.style.left = `${(w - EXPANDED_W) / 2}px`;
     this.uploadCanvas.el.style.left = `${(w - EXPANDED_W) / 2}px`;
 
-    const rect = { x: (PANEL_W - w) / 2, y: 0, w, h: hh };
+    const rect = { x: (this.panelSize.w - w) / 2, y: 0, w, h: hh };
     const p = this.pushedRect;
     if (Math.abs(p.x - rect.x) > 0.5 || Math.abs(p.w - rect.w) > 0.5 || Math.abs(p.h - rect.h) > 0.5) {
       this.pushedRect = rect;
@@ -476,7 +506,7 @@ export class Island {
   private islandRect(): { x: number; y: number; w: number; h: number } {
     const w = this.width.value;
     const hh = this.height.value;
-    return { x: (PANEL_W - w) / 2, y: 0, w, h: hh };
+    return { x: (this.panelSize.w - w) / 2, y: 0, w, h: hh };
   }
 
   // ── Window collapse (hidden → tiny wake strip, zero polling) ────────────────
@@ -525,9 +555,12 @@ export class Island {
     });
 
     window.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && State.mode === "expanded" && !State.isPinned) this.collapse();
+      if (e.key === "Escape" && State.fullscreen) void this.toggleFullscreen();
+      else if (e.key === "Escape" && State.mode === "expanded" && !State.isPinned) this.collapse();
       State.lastActivity = performance.now();
     });
+
+    window.addEventListener("resize", () => this.animateGeometry(false));
 
     void onDragDrop((e) => this.onDragDrop(e));
 
@@ -538,7 +571,7 @@ export class Island {
 
   /**
    * Takes the cursor from the page's own mouse events instead of Rust's poll.
-   * Used where the OS has no global cursor position (Wayland): the events only
+   * Used in browser previews without native cursor polling: the events only
    * fire while the pointer is over the island, so leaving the window is
    * reported as a cursor far away, which is what the poll would have said.
    */
@@ -561,9 +594,10 @@ export class Island {
       UploadSeq.updateCursor(State.mouseInIsland.x, State.mouseInIsland.y);
     }
 
+    const margin = this.fileDragging ? 0 : HIT_MARGIN;
     const inIsland =
-      x >= rect.x - HIT_MARGIN && x <= rect.x + rect.w + HIT_MARGIN &&
-      y >= rect.y - HIT_MARGIN && y <= rect.y + rect.h + HIT_MARGIN;
+      x >= rect.x - margin && x <= rect.x + rect.w + margin &&
+      y >= rect.y - margin && y <= rect.y + rect.h + margin;
     const mayWake = !this.visibilityBlocked;
 
     if (inIsland && !this.wasInIsland) {
@@ -624,6 +658,7 @@ export class Island {
       this.lastLoveTime = performance.now() / 1000;
       this.engine.triggerEmote("love");
       Sound.play("love");
+      this.ensureRunning();
     }, 1900);
   }
 
@@ -693,6 +728,7 @@ export class Island {
       // Kept running even while the drop canvas is up, so the island's own Mochi
       // is already in the right place the moment the canvas fades out.
       this.drawBot(dt);
+      if (State.mode === "compact" || State.handoffs.length > 0) tickMiniBots(dt);
     }
 
     const uploadActive = this.uploadActive;
@@ -716,7 +752,7 @@ export class Island {
       ? settling
       : settling ||
         !this.botCx.settled || !this.botCy.settled || !this.botSize.settled ||
-        greetingActive || this.engine.busy || UploadSeq.isActive;
+        greetingActive || this.engine.busy || UploadSeq.isActive || State.handoffs.length > 0;
 
     if (busy) {
       requestAnimationFrame(this.frame);
@@ -736,7 +772,12 @@ export class Island {
     // The drop canvas draws its own Mochi; two of them would overlap.
     const visible = p.opacity > 0 && !greetingActive && !this.uploadActive && !(State.mode === "expanded" && State.view === "settings");
     this.botCanvas.style.opacity = visible ? "1" : "0";
-    this.botMetrics.style.display = visible ? "block" : "none";
+    this.islandEl.classList.toggle("mascot-talking", visible && State.handoffs.some(item => item.status === "working"));
+    this.handoffScene.style.display = visible && State.handoffs.length > 0 ? "flex" : "none";
+    this.handoffScene.classList.toggle("compact", State.mode === "compact");
+    this.handoffScene.style.left = `${State.mode === "compact" ? this.botCx.value + 17 : this.botCx.value - 34}px`;
+    this.handoffScene.style.top = `${State.mode === "compact" ? 4 : this.botCy.value + 38}px`;
+    this.botMetrics.style.display = visible && State.view === "prompt" && (State.chatBusy || State.chatHistory.length > 0) ? "block" : "none";
     this.botMetrics.textContent = State.tokensPerSecond == null ? "— TPS" : `${State.tokensPerSecond.toFixed(1)} TPS`;
     this.botMetrics.style.left = `${this.botCx.value}px`;
     this.botMetrics.style.top = `${this.botCy.value + p.diameter / 2 + 3}px`;
@@ -778,7 +819,7 @@ export class Island {
     this.engine.bodyColor = focus?.isIntegration ? hexToRGB(focus.color) : null;
     this.engine.particleOverhang = BOT_OVERHANG;
     this.engine.lookX = this.lookX();
-    this.engine.lookY = this.lookY();
+    this.engine.lookY = State.handoffs.some(item => item.status === "working") ? 0.65 : this.lookY();
     if (this.engine.morph > 0.3) {
       this.engine.slotHTarget = State.fileDragOver ? 0.2 : 0;
     } else {
@@ -821,6 +862,45 @@ export class Island {
 
   private syncDom() {
     const expanded = State.mode === "expanded";
+    if (!this.handoffScene) {
+      this.handoffScene = h("div", { class: "handoff-scene", role: "status", "aria-live": "polite" });
+      this.islandEl.append(this.handoffScene);
+    }
+    const handoffs = State.handoffs.slice(State.mode === "compact" ? -1 : -2);
+    const handoffKey = JSON.stringify([State.mode, handoffs]);
+    if (handoffKey !== this.handoffSceneKey) {
+      this.handoffSceneKey = handoffKey;
+      this.handoffTasks = handoffs.map(item => ({ id: item.id, name: item.name, color: item.color,
+        state: item.status === "working" ? "working" : item.status === "error" ? "error" : "finished",
+        source: "ollama", isIntegration: false, steps: [], stepIndex: 0,
+        emote: item.status === "returning" ? "happy" : null,
+      }));
+      this.handoffScene.replaceChildren(...handoffs.map((item, index) => {
+        const message = item.status === "working" ? `Talking to ${item.name}` : item.status === "returning" ? `${item.name} delivered a result` : item.status === "error" ? `${item.name} failed` : `${item.name} stopped`;
+        return h("div", { class: `handoff-helper ${item.status}`, "aria-label": message, title: message, "data-kind": item.kind },
+          h("span", { class: "handoff-packet", "aria-hidden": "true" }),
+          createMiniBot(this.handoffTasks[index], State.mode === "compact" ? 16 : 22, { x: 0, y: -0.8 }),
+          h("span", { class: "handoff-label", text: item.name }),
+          h("span", { class: "handoff-speech", "aria-hidden": "true" }, h("i", {}), h("i", {}), h("i", {})));
+      }));
+      pruneMiniBots();
+    }
+    if (!this.compactServices) {
+      this.compactServices = h("div", { class: "compact-services" });
+      this.islandEl.append(this.compactServices);
+    }
+    this.compactServices.style.display = State.mode === "compact" ? "flex" : "none";
+    const servicesKey = JSON.stringify(State.otherTasks.map(task => [task.id, task.pillBadge]));
+    if (servicesKey !== this.compactServicesKey) {
+      this.compactServicesKey = servicesKey;
+      this.compactServices.replaceChildren(...State.otherTasks.map(task => h("button", {
+        class: "compact-service", title: task.name, "aria-label": task.name,
+        onmousedown: (event: Event) => event.stopPropagation(),
+        onclick: (event: Event) => { event.stopPropagation(); State.setFocus(task.id); this.setView("overview"); this.fsm.forceHome(); },
+      }, createMiniBot(task, 16), ...(task.pillBadge ? [h("span", { class: "compact-badge", text: task.pillBadge === "error" ? "!" : "✓" })] : []))));
+      pruneMiniBots();
+    }
+    syncMiniBotStates([...State.tasks, ...this.handoffTasks]);
     const greetingActive = expanded && State.view === "greeting";
 
     this.contentEl.style.opacity = expanded && !greetingActive ? "1" : "0";
@@ -855,11 +935,12 @@ export class Island {
     Sound.setEnabled(State.settings.soundEnabled);
     Sound.setVolume(State.settings.soundVolume);
     this.fsm.homeToPetitDelay = State.settings.autoCloseInterval;
+    this.animateGeometry(false);
     State.notify();
   }
 
   get panelSize() {
-    return { w: PANEL_W, h: PANEL_H };
+    return { w: window.innerWidth, h: window.innerHeight };
   }
 
   get chatHeight() {

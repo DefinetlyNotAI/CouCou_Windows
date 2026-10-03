@@ -63,6 +63,60 @@ pub fn local_time() -> LocalTime {
     }
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunningApp {
+    executable: String,
+    title: String,
+}
+
+pub fn running_apps() -> Vec<RunningApp> {
+    unsafe extern "system" fn collect(hwnd: HWND, param: ::windows::Win32::Foundation::LPARAM) -> ::windows::core::BOOL {
+        use ::windows::Win32::UI::WindowsAndMessaging::{GetWindowTextLengthW, GetWindowTextW};
+        if !unsafe { IsWindowVisible(hwnd) }.as_bool() || process_id(hwnd) == std::process::id() || is_shell_desktop_window(hwnd) {
+            return true.into();
+        }
+        let length = unsafe { GetWindowTextLengthW(hwnd) };
+        if length <= 0 { return true.into(); }
+        if let Some(executable) = executable_name(hwnd) {
+            let mut title = vec![0u16; length as usize + 1];
+            let written = unsafe { GetWindowTextW(hwnd, &mut title) };
+            let apps = unsafe { &mut *(param.0 as *mut Vec<RunningApp>) };
+            apps.push(RunningApp { executable, title: String::from_utf16_lossy(&title[..written.max(0) as usize]) });
+        }
+        true.into()
+    }
+    let mut apps: Vec<RunningApp> = Vec::new();
+    unsafe {
+        let _ = ::windows::Win32::UI::WindowsAndMessaging::EnumWindows(Some(collect), ::windows::Win32::Foundation::LPARAM((&mut apps as *mut Vec<RunningApp>) as isize));
+    }
+    apps.sort_by(|a, b| a.executable.to_lowercase().cmp(&b.executable.to_lowercase()));
+    apps.dedup_by(|a, b| a.executable.eq_ignore_ascii_case(&b.executable));
+    apps
+}
+
+pub fn choose_file(win: &WebviewWindow) -> Result<Option<String>, String> {
+    use ::windows::Win32::UI::Controls::Dialogs::{CommDlgExtendedError, GetOpenFileNameW, OPENFILENAMEW, OFN_FILEMUSTEXIST, OFN_PATHMUSTEXIST, OFN_NOCHANGEDIR};
+    let mut path = vec![0u16; 32768];
+    let filter: Vec<u16> = "All files\0*.*\0\0".encode_utf16().collect();
+    let dialog = OPENFILENAMEW {
+        lStructSize: std::mem::size_of::<OPENFILENAMEW>() as u32,
+        hwndOwner: HWND(win.hwnd().map_err(|e| e.to_string())?.0),
+        lpstrFilter: ::windows::core::PCWSTR(filter.as_ptr()),
+        lpstrFile: PWSTR(path.as_mut_ptr()),
+        nMaxFile: path.len() as u32,
+        Flags: OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR,
+        ..Default::default()
+    };
+    let mut dialog = dialog;
+    if unsafe { GetOpenFileNameW(&mut dialog) }.as_bool() {
+        let end = path.iter().position(|c| *c == 0).unwrap_or(path.len());
+        return Ok(Some(String::from_utf16_lossy(&path[..end])));
+    }
+    let error = unsafe { CommDlgExtendedError() };
+    if error.0 == 0 { Ok(None) } else { Err(format!("File picker failed: {}", error.0)) }
+}
+
 // ── Processes ─────────────────────────────────────────────────────────────────
 
 /// Spawned helpers must never flash a console window.

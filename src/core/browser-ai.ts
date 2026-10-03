@@ -161,6 +161,11 @@ class BrowserAIClient {
     await active.done;
   }
 
+  async restore(messages: { role: "user" | "assistant"; content: string }[]): Promise<void> {
+    await this.reset();
+    this.history = messages.map(message => ({ role: message.role, content: message.content }));
+  }
+
   reset(): Promise<void> {
     const reset = this.resetChain.then(async () => {
       const active = this.active;
@@ -201,7 +206,7 @@ class BrowserAIClient {
     this.assertActive(active);
 
     let userContent = query;
-    if (context && this.history.length === 0) {
+    if (context) {
       const text = await Bridge.browserContext(context);
       this.assertActive(active);
       userContent = `${text}\n\n${query}`;

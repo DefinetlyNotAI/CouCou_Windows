@@ -18,6 +18,8 @@
   },
   "dependencies": {
     "@mlc-ai/web-llm": "0.2.85",
-    "@tauri-apps/api": "^2"
+    "@tauri-apps/api": "^2",
+    "dompurify": "^3.4.16",
+    "marked": "^18.0.14"
   }
 }

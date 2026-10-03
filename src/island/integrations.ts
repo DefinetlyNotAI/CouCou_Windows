@@ -47,6 +47,9 @@ function handle(island: Island, update: IntegrationUpdate) {
   if (event) {
     const task = State.tasks.find((t) => t.id === update.id);
     if (task) {
+      const deliveryId = `integration:${update.id}:${Date.now()}`;
+      State.startHandoff({ id: deliveryId, name: task.name, color: task.color, kind: "service" });
+      State.finishHandoff(deliveryId, event.success ? "returning" : "error");
       task.state = event.success ? "finished" : "error";
       task.steps = event.detail ? [event.label, event.detail] : [event.label];
       task.stepIndex = task.steps.length - 1;
