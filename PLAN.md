@@ -1,6 +1,8 @@
 # CouCou implementation plan
 
-Status: implementation commits landed for all 20 stages. Runtime verification remains partial as recorded below; do not infer runtime completion from compilation. User requested no further test execution.
+Status: implementation commits landed for all 20 stages. Runtime verification remains partial as recorded below; do not infer runtime completion from compilation. The user subsequently authorized tests; current evidence is recorded below.
+
+Authorized verification follow-up: existing JavaScript tests passed (3), native tests passed (10; 1 live test ignored in the default suite), and separate live Ollama checks passed for Gemma greeting/streaming and Qwen3.5 tool calling. Phi4-mini returned text without the requested tool call, failing that model-specific assertion. The native test executable now links the Windows common-controls manifest; attachment tests verify encrypted storage in an isolated temporary inbox. Browser preview checks confirmed temporary-chat status and command palette bounds after layout repairs. Full native UI and service acceptance remains unverified.
 
 Stage 17 follow-up: stopping background commands now terminates their Windows process tree, and inherited output pipes cannot delay completion indefinitely. Process watchers report Windows access/query errors instead of falsely reporting completion. Source inspection only; tests skipped as requested.
 
@@ -56,7 +58,7 @@ Stage 15: Git status/working/staged diffs, stage/unstage, commits, branch list/c
 
 Stage 16: structured and fullscreen GitHub issues/PRs/Actions/releases/repository search/draft PR creation/change review; Vercel deployments/build logs/domains/env/preview links/status/rollback. Existing secure keys and permission routing used; API failures propagate to tool errors. Frontend/native compilation passed. No external service reads or mutations executed during verification.
 
-Stages 17–20 remain pending. Runtime checks listed above remain part of the full-goal verification scope; implementation commits do not claim those checks passed. The existing release installer predates these changes and needs rebuilding before delivery.
+All 20 stages have implementation commits. Runtime checks listed above remain part of the full-goal verification scope; implementation commits do not claim those checks passed.
 
 ---
 

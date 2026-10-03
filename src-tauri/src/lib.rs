@@ -1,5 +1,10 @@
 // Coucou for Windows — app wiring and the commands the island calls.
 
+// Tauri links this manifest into application binaries, but not library tests.
+#[cfg(test)]
+#[link(name="resource",kind="static")]
+extern "C" {}
+
 mod ollama;
 mod voice;
 mod desktop;

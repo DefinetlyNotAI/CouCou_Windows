@@ -21,15 +21,17 @@ pub fn inbox_dir() -> PathBuf {
 }
 
 pub fn ingest(source: &str) -> Result<DroppedFile, String> {
+    ingest_into(source, &inbox_dir())
+}
+
+fn ingest_into(source: &str, dir: &Path) -> Result<DroppedFile, String> {
     let src = Path::new(source);
     let meta = std::fs::metadata(src).map_err(|e| format!("cannot read {source}: {e}"))?;
     if meta.is_dir() {
         return Err("Folders can't be dropped yet.".into());
     }
 
-    let dir = inbox_dir();
-    crate::platform::ensure_private_dir(&settings::local_dir()).map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    crate::platform::ensure_private_dir(dir).map_err(|e| e.to_string())?;
 
     let name = src
         .file_name()
@@ -89,22 +91,24 @@ mod tests {
     fn ingest_copies_and_never_overwrites() {
         let tmp = std::env::temp_dir().join(format!("coucou-test-{}", std::process::id()));
         std::fs::create_dir_all(&tmp).unwrap();
+        let inbox=tmp.join("inbox");
         let source = tmp.join("note.txt");
         std::fs::write(&source, b"hello").unwrap();
 
-        let first = ingest(source.to_str().unwrap()).unwrap();
+        let first = ingest_into(source.to_str().unwrap(),&inbox).unwrap();
         assert_eq!(first.name, "note.txt");
-        assert_eq!(std::fs::read(&first.path).unwrap(), b"hello");
+        assert_ne!(std::fs::read(&first.path).unwrap(), b"hello");
+        assert_eq!(crate::storage::read(Path::new(&first.path)).unwrap(), b"hello");
 
         // A second drop of the same name must not clobber the first copy.
         std::fs::write(&source, b"second").unwrap();
-        let second = ingest(source.to_str().unwrap()).unwrap();
+        let second = ingest_into(source.to_str().unwrap(),&inbox).unwrap();
         assert_ne!(first.path, second.path);
-        assert_eq!(std::fs::read(&first.path).unwrap(), b"hello");
-        assert_eq!(std::fs::read(&second.path).unwrap(), b"second");
+        assert_eq!(crate::storage::read(Path::new(&first.path)).unwrap(), b"hello");
+        assert_eq!(crate::storage::read(Path::new(&second.path)).unwrap(), b"second");
 
         // Folders are refused rather than silently ignored.
-        assert!(ingest(tmp.to_str().unwrap()).is_err());
+        assert!(ingest_into(tmp.to_str().unwrap(),&inbox).is_err());
 
         // An ancient source must not arrive already older than the sweep window.
         let old_source = tmp.join("ancient.txt");
@@ -116,7 +120,7 @@ mod tests {
             .unwrap()
             .set_modified(long_ago)
             .unwrap();
-        let aged = ingest(old_source.to_str().unwrap()).unwrap();
+        let aged = ingest_into(old_source.to_str().unwrap(),&inbox).unwrap();
         assert!(
             Path::new(&aged.path).exists(),
             "a file copied just now was swept as if it were a week old"

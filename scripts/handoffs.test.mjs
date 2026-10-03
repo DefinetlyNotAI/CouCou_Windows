@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import ts from "typescript";
 
-const source = readFileSync(new URL("../src/core/state.ts", import.meta.url), "utf8");
+const bridgeSource = readFileSync(new URL("../src/core/bridge.ts", import.meta.url), "utf8");
+const bridge = ts.transpileModule(bridgeSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
+  .replace(/from "(@tauri-apps\/api\/[^\"]+)"/g, (_, specifier) => `from "${import.meta.resolve(specifier)}"`);
+const bridgeUrl = `data:text/javascript;base64,${Buffer.from(bridge).toString("base64")}`;
+const source = readFileSync(new URL("../src/core/state.ts", import.meta.url), "utf8").replace('from "./bridge"', `from "${bridgeUrl}"`);
 const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } });
 const { State } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`);
 const timers = new Map();
