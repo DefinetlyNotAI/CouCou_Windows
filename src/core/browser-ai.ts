@@ -41,7 +41,7 @@ interface PendingToolCall {
   arguments: string;
 }
 
-const SYSTEM_PROMPT =
+export const SYSTEM_PROMPT =
   "You are Mochi, a personal assistant living at the top of the user's screen. " +
   "Respond in the user's language, using Markdown with clear paragraphs. " +
   "Use only tools provided to you. For current information, search when a web_search tool is available. " +
@@ -401,6 +401,7 @@ class BrowserAIClient {
         this.assertActive(active);
         for (const source of result.sources) appendSource(sources, source);
         this.progress(active, "tool-result", `${name} completed`, name);
+        this.progress(active, "tool-output", result.content, name);
         messages.push({ role: "tool", tool_call_id: call.id, content: result.content });
       }
     }

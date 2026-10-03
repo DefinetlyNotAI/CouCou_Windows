@@ -35,6 +35,10 @@ export interface ChatMessage {
   content: string;
   file?: { name: string; path: string };
   status?: "complete" | "stopped";
+  pinned?: boolean;
+  inContext?: boolean;
+  filePinned?: boolean;
+  fileActive?: boolean;
 }
 
 export interface SavedChat {
@@ -46,6 +50,7 @@ export interface SavedChat {
   parentId?: string;
   branchMessageId?: number;
   projectId?: string;
+  toolResults?: { tool:string; content:string }[];
 }
 
 export interface MascotHandoff {
@@ -195,6 +200,7 @@ class AppState {
   voiceBusy = false;
   promptQueue: { id: string; text: string; file: { name: string; path: string } | null }[] = [];
   toolActivity: { tool: string; phase: string; text: string }[] = [];
+  toolResults: { tool:string; content:string }[] = [];
   quickActionsExpanded = false;
   toolActivityExpanded = false;
   chatStatus = "";
@@ -233,7 +239,7 @@ class AppState {
     if (!this.chatHistory.length) return;
     const title = this.chatHistory.find(message => message.role === "user")?.content.slice(0, 80) || "Chat";
     const chat: SavedChat = { id: this.chatId, title, updatedAt: Date.now(), messages: structuredClone(this.chatHistory),
-      models: this.chatModels ? { ...this.chatModels } : undefined, parentId: this.chatParentId, branchMessageId: this.chatBranchMessageId, projectId: this.chatProjectId };
+      models: this.chatModels ? { ...this.chatModels } : undefined, parentId: this.chatParentId, branchMessageId: this.chatBranchMessageId, projectId: this.chatProjectId, toolResults: structuredClone(this.toolResults) };
     this.savedChats = [chat, ...this.savedChats.filter(item => item.id !== chat.id)];
     try { localStorage.setItem("coucou.chats", JSON.stringify(this.savedChats)); }
     catch { this.chatStatus = "Chat storage is full. This conversation could not be saved."; }
@@ -247,6 +253,7 @@ class AppState {
     this.chatHistory = structuredClone(messages);
     this.promptQueue = [];
     this.toolActivity = [];
+    this.toolResults = [];
     this.saveChat();
   }
 

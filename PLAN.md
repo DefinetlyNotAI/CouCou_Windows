@@ -1,6 +1,6 @@
 # CouCou implementation plan
 
-Status: stages 1–10 implementation landed; runtime verification remains partial as recorded below. Stage 11 is next. Preserve the full 20-stage scope and one implementation commit per stage. User requested no further test execution; use compilation and diff inspection only for subsequent stages.
+Status: stages 1–11 implementation landed; runtime verification remains partial as recorded below. Stage 12 is next. Preserve the full 20-stage scope and one implementation commit per stage. User requested no further test execution; use compilation and diff inspection only for subsequent stages.
 
 Stage 1 changes implemented so far: sanitized Markdown, scroll-position preservation during generation, removable attachments, uploads without chat reset, attachment context on later turns, removal of the 200 KB text cap, compact service mascots, chat-only TPS, 0–100% audio volume, exact island bounds for drag entry, native file picker, running-app picker, mascot hover-animation wake-up, and locally saved chats that reopen from recent activity with conversation text restored to either backend.
 
@@ -32,7 +32,9 @@ Stage 9: editable MCP command/HTTP servers, args/env/enabled/permissions, import
 
 Stage 10: attach a Windows folder once, stored projects with chats/folder/Git/agent/instructions/memory/MCP/permissions, project selection in chat quick actions, project prompt context in both backends and project permission/MCP restrictions. Native validates/canonicalizes folders and detects Git repositories. Frontend/native compilation passed; no tests executed.
 
-Stages 11–20 remain pending. Runtime checks listed above remain part of the full-goal verification scope; implementation commits do not claim those checks passed. The existing release installer predates these changes and needs rebuilding before delivery.
+Stage 11: context inspector for system/agent/project instructions, memory, messages, files and tool result history; estimated visible-text tokens explicitly labeled; pin/exclude messages, pin/select files, model-generated summary branches, and clear model context without deleting visible history. Restored native/browser context reattaches selected files. Tool-result history is displayed separately from restored message context. Frontend/native compilation passed; no tests executed; live model journeys remain unverified.
+
+Stages 12–20 remain pending. Runtime checks listed above remain part of the full-goal verification scope; implementation commits do not claim those checks passed. The existing release installer predates these changes and needs rebuilding before delivery.
 
 ---
 

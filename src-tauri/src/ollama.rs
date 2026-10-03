@@ -39,11 +39,19 @@ impl Chat {
         self.messages.lock().await.clear();
     }
 
-    pub async fn restore(&self, messages: Vec<Value>) -> Result<(), String> {
+    pub async fn restore(&self, mut messages: Vec<Value>) -> Result<(), String> {
         if messages.iter().any(|message| !matches!(message["role"].as_str(), Some("user" | "assistant")) || !message["content"].is_string()) {
             return Err("Invalid saved conversation".into());
         }
         self.cancel(None);
+        for message in &mut messages {
+            if let Some(file)=message.get("file").cloned() {
+                let name=file["name"].as_str().ok_or("Invalid saved file name")?;
+                let path=file["path"].as_str().ok_or("Invalid saved file path")?;
+                attach_file(message,name,path)?;
+                message.as_object_mut().unwrap().remove("file");
+            }
+        }
         *self.messages.lock().await = messages;
         Ok(())
     }
@@ -317,6 +325,7 @@ async fn run_turn<F: Fn(ChatProgress) + Send + Sync>(
             } else { execute_tool(name, &arguments, key.as_deref(), &mut sources).await };
             let content = match result {
                 Ok(value) => {
+                    emit(progress(request_id,"tool-output",&value.to_string(),Some(name)));
                     if name.starts_with("web.") {
                         if let Some(results) = value["results"].as_array() {
                             for result in results { if let Some(url) = result["url"].as_str() { add_source(&mut sources,result["title"].as_str().unwrap_or(url),url); } }

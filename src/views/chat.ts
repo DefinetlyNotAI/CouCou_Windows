@@ -6,11 +6,24 @@ import { BrowserAI } from "../core/browser-ai";
 import { Sound } from "../core/sound";
 import { State, INTEGRATION_AGENTS, type ChatMessage } from "../core/state";
 import { profiles, selectAgent } from "../core/agents";
+import { buildContext } from "./context";
 import type { ViewHost } from "./views";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 
 let nextId = 1;
+
+async function restoreConversation(messages: ChatMessage[]) {
+  const active=messages.filter(message=>message.inContext!==false);
+  const history=active.map(message=>({role:message.role,content:message.content,file:message.fileActive!==false ? message.file : undefined}));
+  if(IS_TAURI) await Bridge.chatRestore(history);
+  const browserHistory=[];
+  for(const message of history) {
+    const prefix=State.settings.chatBackend==="browser" && message.file ? await Bridge.browserContext({kind:"file",...message.file}) : "";
+    browserHistory.push({role:message.role,content:prefix ? `${prefix}\n\n${message.content}` : message.content});
+  }
+  await BrowserAI.restore(browserHistory);
+}
 
 export async function reopenChat(id: string): Promise<boolean> {
   if (State.chatBusy || State.voiceBusy) return false;
@@ -19,9 +32,7 @@ export async function reopenChat(id: string): Promise<boolean> {
   State.chatBusy = true;
   State.notify();
   try {
-    const messages = chat.messages.map(({ role, content }) => ({ role, content }));
-    if (IS_TAURI) await Bridge.chatRestore(messages);
-    await BrowserAI.restore(messages);
+    await restoreConversation(chat.messages);
     State.saveChat();
     State.chatId = chat.id;
     State.chatHistory = chat.messages.map(message => ({ ...message }));
@@ -36,6 +47,7 @@ export async function reopenChat(id: string): Promise<boolean> {
     State.tokensPerSecond = null;
     State.promptQueue = [];
     State.toolActivity = [];
+    State.toolResults = structuredClone(chat.toolResults ?? []);
     State.notify();
     return true;
   } catch (error) {
@@ -80,6 +92,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   const log = h("div", { class: "chat-log", "aria-live": "polite" });
   const status = h("div", { class: "chat-status", role: "status" });
   const permissionPanel = h("div", { class: "tool-permissions" });
+  const contextInspector=buildContext(()=>void updateContext(),()=>void summarizeContext(),()=>void clearContext(),()=>resetting);
   void onEvent<{ id: string; category: string; request: { name: string; input: unknown; chatId: string; projectId: string } }>("tool-permission", event => {
     State.view = "prompt"; State.mode = "expanded";
     const detail = h("pre", { text: JSON.stringify(event.request.input, null, 2) });
@@ -140,7 +153,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   const readAloud = h("button", { class: "chat-reset", title: "Read reply aloud", "aria-label": "Read reply aloud" }, svg(ICONS.speakerOn, 14)) as HTMLButtonElement;
   const queueButton = h("button", { class: "chat-reset", title: "Queue message", "aria-label": "Queue message" }, svg("M4 4h12v2H4V4zm0 5h12v2H4V9zm0 5h7v2H4v-2zm14-1v3h3v2h-3v3h-2v-3h-3v-2h3v-3h2z", 14)) as HTMLButtonElement;
   const bar = h("div", { class: "chat-bar" }, reset, upload, microphone, call, readAloud, input, queueButton, send);
-  const el = h("div", { class: "view" }, h("div", { class: "card wash chat-card" }, h("div", { class: "chat-body" }, toolbar, quickActions, chipRow, log, permissionPanel, activity, queued, status, bar)));
+  const el = h("div", { class: "view" }, h("div", { class: "card wash chat-card" }, h("div", { class: "chat-body" }, toolbar, quickActions, chipRow, log, contextInspector.el, permissionPanel, activity, queued, status, bar)));
   (el.querySelector(".card") as HTMLElement).style.setProperty("--wash", "rgba(99,102,241,0.5)");
 
   let renderedKey = "";
@@ -373,6 +386,8 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     } else if (event.phase === "metrics") {
       const speed = Number(event.text);
       State.tokensPerSecond = Number.isFinite(speed) && speed >= 0 ? speed : null;
+    } else if(event.phase==="tool-output") {
+      State.toolResults.push({tool:event.tool || "Tool",content:event.text}); State.toolResults=State.toolResults.slice(-100);
     } else if (event.phase === "loading" || event.phase === "thinking") {
       State.chatStatus = event.text;
     }
@@ -393,9 +408,34 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   let pendingUserId: number | null = null;
   let bufferedReply = "";
   async function restoreContext(messages: ChatMessage[]) {
-    const history = messages.map(({ role, content }) => ({ role, content }));
-    if (IS_TAURI) await Bridge.chatRestore(history);
-    await BrowserAI.restore(history);
+    await restoreConversation(messages);
+  }
+  async function updateContext() {
+    if(State.chatBusy || State.voiceBusy || resetting) return;
+    resetting=true; State.notify();
+    try { await restoreContext(State.chatHistory); State.saveChat(); State.chatStatus=""; }
+    catch(error) { State.chatStatus=String(error); }
+    finally { resetting=false; State.notify(); onHeightChange(); }
+  }
+  async function clearContext() {
+    if(State.chatBusy || State.voiceBusy || resetting) return;
+    for(const message of State.chatHistory) { message.inContext=false; message.pinned=false; message.filePinned=false; }
+    State.toolResults=[]; await updateContext();
+  }
+  async function summarizeContext() {
+    if(State.chatBusy || State.voiceBusy || resetting) return;
+    const original=structuredClone(State.chatHistory);
+    const older=original.slice(0,-4).filter(message=>message.inContext!==false && !message.pinned && !message.filePinned);
+    if(!older.length) return;
+    stopVoice();
+    turnFinished=submit(`Summarize the following earlier conversation concisely, preserving decisions, requirements and unresolved work:\n${older.map(message=>`${message.role}: ${message.content}`).join("\n")}`,null);
+    if(!await turnFinished) return;
+    const summary=State.chatHistory.at(-1)!;
+    const messages=[...original.slice(0,-4).filter(message=>message.pinned || message.filePinned),{id:nextId++,role:"user" as const,content:"Earlier conversation summary:"},{...summary},...original.slice(-4)];
+    resetting=true; State.notify();
+    try { await restoreContext(messages); State.branchChat(older.at(-1)!.id,messages); State.chatStatus=""; }
+    catch(error) { State.chatStatus=String(error); }
+    finally { resetting=false; State.notify(); onHeightChange(); }
   }
   async function branch(message: ChatMessage, action: "branch" | "edit" | "regenerate") {
     if (State.chatBusy || State.voiceBusy || resetting) return;
@@ -535,6 +575,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     resetting = true;
     State.promptQueue = [];
     State.toolActivity = [];
+    State.toolResults=[];
     if (State.chatBusy) stop();
     await turnFinished;
     await Bridge.chatReset();
@@ -598,6 +639,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   return {
     el,
     sync() {
+      contextInspector.sync();
       searchWeb.disabled = !IS_TAURI;
       screenshot.disabled = !IS_TAURI || desktopBusy;
       pasteClipboard.disabled = !IS_TAURI || desktopBusy;

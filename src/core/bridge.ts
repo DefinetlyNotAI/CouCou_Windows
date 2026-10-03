@@ -82,7 +82,7 @@ export const Bridge = {
     callOrThrow<{ content: string; sources: ChatSource[] }>("browser_tool", { name, arguments: input }),
   browserContext: (context: ChatContext) => callOrThrow<string>("browser_context", { context }),
   chatReset: () => call<void>("chat_reset"),
-  chatRestore: (messages: { role: string; content: string }[]) => callOrThrow<void>("chat_restore", { messages }),
+  chatRestore: (messages: { role: string; content: string; file?:{name:string;path:string} }[]) => callOrThrow<void>("chat_restore", { messages }),
   /** Copies a dropped file into the inbox. */
   ingestFile: (path: string) => callOrThrow<DroppedFile>("ingest_file", { path }),
   /** Only ever tells you whether a key exists — never its value. */
