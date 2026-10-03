@@ -16,6 +16,13 @@ pub fn decide(id: String, decision: String) -> Result<(), String> {
 }
 pub async fn authorize<R: tauri::Runtime>(app: &AppHandle<R>, request: &ToolRequest) -> Result<(), String> {
     let base_category = crate::tools::category(&request.name).ok_or("Unknown tool")?;
+    if matches!(request.name.as_str(), "project.index" | "project.search") {
+        if let Some(target) = request.input["projectId"].as_str().filter(|id| !id.is_empty()) {
+            if target != request.project_id {
+                return Err("Select the target project before indexing or searching it".into());
+            }
+        }
+    }
     let script = request.input["script"].as_str().unwrap_or("").to_lowercase();
     let program = request.input["program"].as_str().unwrap_or("").to_lowercase();
     let category = if base_category == "run" && (request.input["admin"].as_bool() == Some(true) || script.contains("runas") || program.ends_with("runas.exe") || program == "runas") { "admin" } else { base_category };
@@ -71,6 +78,24 @@ mod tests {
     use super::*;
     use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
     use tauri::Listener;
+
+    #[test]
+    fn project_tools_reject_a_target_outside_the_approval_scope() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let app = tauri::test::mock_app();
+            let mut settings = crate::settings::Settings::default();
+            settings.tool_permissions.insert("read:project.search".into(), "deny".into());
+            app.manage(Shared { settings: Mutex::new(settings), gate: Arc::new(crate::island::PollGate::new()) });
+            let mut request = ToolRequest { name: "project.search".into(), input: json!({"projectId":"project-b","query":"test"}), chat_id: "scope-test".into(), project_id: "project-a".into() };
+            assert_eq!(authorize(app.handle(), &request).await.unwrap_err(), "Select the target project before indexing or searching it");
+            request.project_id.clear();
+            assert_eq!(authorize(app.handle(), &request).await.unwrap_err(), "Select the target project before indexing or searching it");
+            request.project_id = "project-b".into();
+            assert_eq!(authorize(app.handle(), &request).await.unwrap_err(), "Tool denied by permission settings");
+            request.input = json!({"query":"test"});
+            assert_eq!(authorize(app.handle(), &request).await.unwrap_err(), "Tool denied by permission settings");
+        });
+    }
 
     #[test]
     fn approval_grants_are_scoped_and_denials_override_grants() {
