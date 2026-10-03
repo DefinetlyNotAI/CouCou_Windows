@@ -2,6 +2,8 @@
 
 Status: implementation commits landed for all 20 stages. Runtime verification remains partial as recorded below; do not infer runtime completion from compilation. User requested no further test execution.
 
+Stage 17 follow-up: stopping background commands now terminates their Windows process tree, and inherited output pipes cannot delay completion indefinitely. Process watchers report Windows access/query errors instead of falsely reporting completion. Source inspection only; tests skipped as requested.
+
 Stage 20: Ctrl+K command palette, slash commands, shortcuts, temporary chats, folder/tag organization, full chat search, merge import/export, password-encrypted AES-GCM backups, preference profiles, DPAPI-encrypted native preferences/chats/indexes/schedules/attachments, legacy chat migration and portable data directory. Browser-backed search now reads a new tab through the user's configured local Chromium debugging endpoint. Frontend production build and native compilation passed; no tests or browser/service journeys executed. DPAPI data remains tied to its Windows account; portable transfers use password-encrypted backups. Browser-only development storage is not DPAPI protected.
 
 Release packaging: `npm run pack` completed successfully after stage 20, including TypeScript/Vite production compilation, optimized native compilation and NSIS packaging. Updated `release/CouCou-Shahm-Edition-v0.1.1-ollama-setup.exe` and its unversioned alias (8.74 MiB). Installer execution and runtime acceptance remain unverified; no tests executed as requested.

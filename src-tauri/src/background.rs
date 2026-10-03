@@ -55,8 +55,18 @@ async fn command(app:&AppHandle,task:&Task,mut signal:watch::Receiver<bool>)->Re
     let out_app=app.clone();let out_id=task.id.clone();let err_app=app.clone();let err_id=task.id.clone();
     let out=tokio::spawn(async move {let mut lines=BufReader::new(stdout).lines();while let Ok(Some(line))=lines.next_line().await {emit(&out_app,&out_id,None,Some(line));}});
     let err=tokio::spawn(async move {let mut lines=BufReader::new(stderr).lines();while let Ok(Some(line))=lines.next_line().await {emit(&err_app,&err_id,None,Some(line));}});
-    let result=tokio::select! {_=signal.changed()=>{let _=child.kill().await;Err("Task stopped".into())},result=child.wait()=>{let result=result.map_err(|error|error.to_string())?;emit(app,&task.id,None,Some(format!("Exit code: {:?}",result.code())));if result.success(){Ok(())}else{Err(format!("Command exited with {:?}",result.code()))}}};
-    let _=out.await;let _=err.await;result
+    let result=tokio::select! {_=signal.changed()=>{
+        if let Some(pid)=child.id() {
+            let executable=std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap_or_else(||"C:\\Windows".into())).join("System32/taskkill.exe");
+            let mut kill=tokio::process::Command::new(executable);
+            kill.args(["/PID",&pid.to_string(),"/T","/F"]).stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);kill.as_std_mut().creation_flags(0x08000000);
+            let _=tokio::time::timeout(std::time::Duration::from_secs(5),kill.status()).await;
+        }
+        let _=child.kill().await;Err("Task stopped".into())
+    },result=child.wait()=>{let result=result.map_err(|error|error.to_string())?;emit(app,&task.id,None,Some(format!("Exit code: {:?}",result.code())));if result.success(){Ok(())}else{Err(format!("Command exited with {:?}",result.code()))}}};
+    let mut out=out;let mut err=err;
+    if tokio::time::timeout(std::time::Duration::from_secs(2),async {let _=(&mut out).await;let _=(&mut err).await;}).await.is_err(){out.abort();err.abort();}
+    result
 }
 async fn work(app:&AppHandle,task:&Task,mut signal:watch::Receiver<bool>)->Result<(),String> {
     if task.kind=="command" {return command(app,task,signal).await;}
@@ -67,7 +77,11 @@ async fn work(app:&AppHandle,task:&Task,mut signal:watch::Receiver<bool>)->Resul
             "port"=>{if tokio::net::TcpStream::connect(("127.0.0.1",task.input["port"].as_u64().unwrap() as u16)).await.is_ok(){return Ok(());}},
             "process"=>{
                 use windows::Win32::{Foundation::CloseHandle,System::Threading::{OpenProcess,GetExitCodeProcess,PROCESS_QUERY_LIMITED_INFORMATION}};
-                let running=unsafe {match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,false,task.input["pid"].as_u64().unwrap() as u32){Ok(handle)=>{let mut code=0;let result=GetExitCodeProcess(handle,&mut code);let _=CloseHandle(handle);result.is_ok() && code==259},Err(_)=>false}};
+                let running=unsafe {match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,false,task.input["pid"].as_u64().unwrap() as u32){
+                    Ok(handle)=>{let mut code=0;let result=GetExitCodeProcess(handle,&mut code);let _=CloseHandle(handle);result.map_err(|error|format!("Cannot inspect watched process: {error}"))?;code==259},
+                    Err(error) if error.code().0==0x80070057u32 as i32=>false,
+                    Err(error)=>return Err(format!("Cannot open watched process: {error}")),
+                }};
                 if !running{return Ok(());}
             },
             "log"=>{
