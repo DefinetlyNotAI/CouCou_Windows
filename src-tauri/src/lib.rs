@@ -147,8 +147,10 @@ async fn chat_send(
     request_id: String,
     query: String,
     context: Option<ChatContext>,
+    model: Option<String>,
 ) -> Result<ChatReply, String> {
-    let settings = shared.settings.lock().unwrap().clone();
+    let mut settings = shared.settings.lock().unwrap().clone();
+    if let Some(model) = model { settings.ollama_model = model; }
     ollama::send(&chat, &settings, &request_id, query, context, |event| {
         if !matches!(event.phase.as_str(), "streaming" | "thinking") {
             log::line(format!("ollama {} request={} tool={}", event.phase, event.request_id, event.tool.as_deref().unwrap_or("")));

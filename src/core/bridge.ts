@@ -65,8 +65,8 @@ export const Bridge = {
 
   // ── Chat, files, secrets ──────────────────────────────────────────────────
   /** One local chat turn. File bytes stay on the Rust side. */
-  chatSend: (requestId: string, query: string, context: ChatContext | null) =>
-    callOrThrow<{ text: string; sources: ChatSource[] }>("chat_send", { requestId, query, context }),
+  chatSend: (requestId: string, query: string, context: ChatContext | null, model?: string) =>
+    callOrThrow<{ text: string; sources: ChatSource[] }>("chat_send", { requestId, query, context, model }),
   chatCancel: (requestId: string) => call<void>("chat_cancel", { requestId }),
   voiceRun: (requestId: string, mode: "capabilities" | "listen" | "speak", text = "", volume = 100) =>
     callOrThrow<{ text?: string; voices?: string[]; languages?: string[] }>("voice_run", { requestId, mode, text, volume }),

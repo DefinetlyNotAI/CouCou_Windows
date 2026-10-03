@@ -24,6 +24,9 @@ export async function reopenChat(id: string): Promise<boolean> {
     State.saveChat();
     State.chatId = chat.id;
     State.chatHistory = chat.messages.map(message => ({ ...message }));
+    State.chatModels = chat.models ? { ...chat.models } : null;
+    State.chatParentId = chat.parentId;
+    State.chatBranchMessageId = chat.branchMessageId;
     nextId = Math.max(nextId, ...chat.messages.map(message => message.id + 1));
     State.droppedFile = null;
     State.promptContext = null;
@@ -119,6 +122,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   let renderedKey = "";
   let assistant: ChatMessage | null = null;
   let stopping = false;
+  let streamLive = true;
   let resetting = false;
   let turnFinished: Promise<unknown> | null = null;
   let submittedFile: { name: string; path: string } | null = null;
@@ -155,14 +159,17 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   const screenshot = h("button", { class: "link-btn", text: "Screenshot", onclick: () => void desktopAction("screenshot") }) as HTMLButtonElement;
   const pasteClipboard = h("button", { class: "link-btn", text: "Paste clipboard", onclick: () => void desktopAction("clipboard") }) as HTMLButtonElement;
   const copyReply = h("button", { class: "link-btn", text: "Copy reply", onclick: () => void desktopAction("copy") }) as HTMLButtonElement;
-  quickMenu.append(searchWeb, screenshot, pasteClipboard, copyReply);
+  const streamMode = h("button", { class: "link-btn", text: "Stream live", onclick: () => { State.streamResponses = !State.streamResponses; State.notify(); } }) as HTMLButtonElement;
+  const continueReply = h("button", { class: "link-btn", text: "Continue reply", onclick: () => launch("Continue your previous response from where you stopped. Avoid repeating it.", null) }) as HTMLButtonElement;
+  quickMenu.append(searchWeb, screenshot, pasteClipboard, copyReply, streamMode, continueReply);
+  function currentModel() { return State.chatModels?.[State.settings.chatBackend] ?? (State.settings.chatBackend === "browser" ? State.settings.browserModel : State.settings.ollamaModel); }
   let refreshingModels = false;
   async function refreshModels() {
     if (refreshingModels) return;
     refreshingModels = true;
     State.notify();
     try {
-      const current = State.settings.chatBackend === "browser" ? State.settings.browserModel : State.settings.ollamaModel;
+      const current = currentModel();
       const models = State.settings.chatBackend === "browser"
         ? ["Llama-3.2-1B-Instruct-q4f16_1-MLC", "Hermes-2-Pro-Llama-3-8B-q4f16_1-MLC"]
         : await Bridge.ollamaModels(State.settings.ollamaUrl);
@@ -173,15 +180,9 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   }
   pickerRefresh.addEventListener("click", () => void refreshModels());
   modelPicker.addEventListener("change", async () => {
-    const key = State.settings.chatBackend === "browser" ? "browserModel" : "ollamaModel";
-    const previous = State.settings[key];
-    const selected = modelPicker.value;
-    State.settings[key] = modelPicker.value;
-    try { if (IS_TAURI) await Bridge.saveSettings(State.settings); }
-    catch (error) {
-      if (State.settings[key] === selected) State.settings[key] = previous;
-      State.chatStatus = String(error).replace(/^Error:\s*/, "");
-    }
+    State.chatModels ??= { ollama: State.settings.ollamaModel, browser: State.settings.browserModel };
+    State.chatModels[State.settings.chatBackend] = modelPicker.value;
+    State.saveChat();
     State.notify();
   });
   profilePicker.addEventListener("change", async () => {
@@ -303,11 +304,13 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     if (event.requestId !== State.chatRequestId || !State.chatBusy || stopping) return;
     const task = State.tasks.find(task => task.id === "integration_ollama");
     if (event.phase === "generating") {
+      bufferedReply = "";
       if (assistant) assistant.content = "";
       State.chatStatus = event.text;
       State.stateOverride = "thinking";
     } else if (event.phase === "streaming") {
-      if (assistant) assistant.content += event.text;
+      bufferedReply += event.text;
+      if (assistant && streamLive) assistant.content = bufferedReply;
       State.chatStatus = "Generating reply…";
       State.stateOverride = "working";
     } else if (["tool-start", "tool-result", "tool-error", "agent-start", "agent-result", "agent-error"].includes(event.phase)) {
@@ -346,20 +349,68 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   }
 
   let pendingUserId: number | null = null;
+  let bufferedReply = "";
+  async function restoreContext(messages: ChatMessage[]) {
+    const history = messages.map(({ role, content }) => ({ role, content }));
+    if (IS_TAURI) await Bridge.chatRestore(history);
+    await BrowserAI.restore(history);
+  }
+  async function branch(message: ChatMessage, action: "branch" | "edit" | "regenerate") {
+    if (State.chatBusy || State.voiceBusy || resetting) return;
+    const index = State.chatHistory.indexOf(message);
+    let end = index + 1;
+    let query: string | undefined;
+    let file: ChatMessage["file"];
+    if (action === "edit") {
+      const edited = window.prompt("Edit message (original stays in the previous chat)", message.content);
+      if (edited === null || !edited.trim()) return;
+      if (message.role === "user") { end = index; query = edited; file = message.file; }
+      else {
+        const messages = structuredClone(State.chatHistory.slice(0, end));
+        messages[index].content = edited;
+        resetting = true; State.notify();
+        try { await restoreContext(messages); State.branchChat(message.id, messages); }
+        catch (error) { State.chatStatus = String(error); }
+        finally { resetting = false; }
+        State.notify(); onHeightChange(); return;
+      }
+    } else if (action === "regenerate") {
+      let userIndex = index;
+      while (userIndex >= 0 && State.chatHistory[userIndex].role !== "user") userIndex--;
+      if (userIndex < 0) return;
+      const user = State.chatHistory[userIndex];
+      end = userIndex; query = user.content; file = user.file;
+    }
+    const messages = State.chatHistory.slice(0, end);
+    resetting = true; State.notify();
+    try {
+      await restoreContext(messages);
+      State.branchChat(message.id, messages);
+      State.chatStatus = "";
+      State.droppedFile = null; State.promptContext = null;
+    } catch (error) { State.chatStatus = String(error); query = undefined; }
+    finally { resetting = false; State.notify(); onHeightChange(); }
+    if (query !== undefined) launch(query, file ?? null);
+  }
   async function submit(queuedQuery?: string, queuedFile?: { name: string; path: string } | null): Promise<boolean> {
     if (resetting) return false;
     if (State.chatBusy) { stop(); return false; }
     const query = (queuedQuery ?? input.value).trim();
     if (!query) return false;
     const requestId = crypto.randomUUID();
+    State.chatModels ??= { ollama: State.settings.ollamaModel, browser: State.settings.browserModel };
     const settings = { ...State.settings };
+    settings.ollamaModel = State.chatModels?.ollama ?? settings.ollamaModel;
+    settings.browserModel = State.chatModels?.browser ?? settings.browserModel;
+    streamLive = State.streamResponses;
+    bufferedReply = "";
     activeBackend = settings.chatBackend;
     const conversation = State.chatHistory;
     const file = queuedQuery === undefined ? State.droppedFile : queuedFile ?? null;
     submittedFile = file;
     const context: ChatContext | null = file ? { kind: "file", name: file.name, path: file.path } : null;
     pendingUserId = nextId++;
-    const user: ChatMessage = { id: pendingUserId, role: "user", content: query };
+    const user: ChatMessage = { id: pendingUserId, role: "user", content: query, file: file ?? undefined };
     const replyMessage: ChatMessage = { id: nextId++, role: "assistant", content: "" };
     assistant = replyMessage;
     stopping = false;
@@ -383,7 +434,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
           if (State.chatRequestId !== requestId || stopping) throw new Error("Reply stopped.");
           return activeBackend === "browser"
             ? BrowserAI.send(requestId, query, context, settings, handleProgress)
-            : Bridge.chatSend(requestId, query, context);
+            : Bridge.chatSend(requestId, query, context, settings.ollamaModel);
         }),
         new Promise<never>((_, reject) => {
           const seconds = Math.max(30, Math.min(600, settings.chatTimeoutSeconds)) + (activeBackend === "browser" ? 605 : 5);
@@ -392,6 +443,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
       ]);
       if (State.chatRequestId !== requestId || State.chatHistory !== conversation) return false;
       replyMessage.content = reply.text;
+      replyMessage.status = "complete";
       if (State.droppedFile === file) { State.droppedFile = null; State.promptContext = null; }
       sources.set(replyMessage.id, reply.sources);
       State.chatStatus = "";
@@ -401,9 +453,14 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     } catch (err) {
       if (State.chatRequestId !== requestId || State.chatHistory !== conversation) return false;
       void (activeBackend === "browser" ? BrowserAI.cancel(requestId) : Bridge.chatCancel(requestId));
-      conversation.splice(conversation.indexOf(user), 2);
+      if (stopping && bufferedReply) {
+        replyMessage.content = bufferedReply;
+        replyMessage.status = "stopped";
+        try { await restoreContext(conversation); }
+        catch (error) { State.chatStatus = `Reply saved; restoring model context failed: ${String(error)}`; }
+      } else conversation.splice(conversation.indexOf(user), 2);
       assistant = null;
-      if (queuedQuery === undefined && !input.value.trim()) input.value = query;
+      if (!replyMessage.content && queuedQuery === undefined && !input.value.trim()) input.value = query;
       State.chatStatus = String(err).replace(/^Error:\s*/, "");
       if (task) { task.state = stopping ? "idle" : "error"; State.appendStep(task.id, State.chatStatus); }
       if (!stopping) Sound.play("error");
@@ -438,6 +495,8 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     await BrowserAI.reset();
     State.saveChat();
     State.chatId = crypto.randomUUID();
+    State.chatModels = null;
+    State.chatParentId = undefined; State.chatBranchMessageId = undefined;
     State.chatHistory = [];
     State.droppedFile = null;
     State.promptContext = null;
@@ -503,15 +562,18 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
           onclick: () => onTaskSelect(task.id),
         }, h("i", { style: `background:${task.color}` }), h("span", { text: task.name }), h("span", { text: task.state }))));
       }
-      const currentModel = State.settings.chatBackend === "browser" ? State.settings.browserModel : State.settings.ollamaModel;
+      streamMode.textContent = State.streamResponses ? "Stream live" : "Show when complete";
+      streamMode.setAttribute("aria-pressed", String(State.streamResponses));
+      continueReply.disabled = State.chatBusy || State.voiceBusy || resetting || State.chatHistory.at(-1)?.role !== "assistant";
+      const selectedModel = currentModel();
       const newModelKey = `${State.settings.chatBackend}:${State.settings.ollamaUrl}`;
       if (modelKey !== newModelKey) {
         modelKey = newModelKey;
-        modelPicker.replaceChildren(h("option", { value: currentModel, text: currentModel || "Choose a model" }));
+        modelPicker.replaceChildren(h("option", { value: selectedModel, text: selectedModel || "Choose a model" }));
       }
-      if (currentModel && ![...modelPicker.options].some(option => option.value === currentModel)) modelPicker.append(h("option", { value: currentModel, text: currentModel }));
-      modelPicker.value = currentModel;
-      modelPicker.title = currentModel || "Choose a model";
+      if (selectedModel && ![...modelPicker.options].some(option => option.value === selectedModel)) modelPicker.append(h("option", { value: selectedModel, text: selectedModel }));
+      modelPicker.value = selectedModel;
+      modelPicker.title = selectedModel || "Choose a model";
       modelPicker.disabled = State.chatBusy || State.voiceBusy || refreshingModels;
       pickerRefresh.disabled = State.chatBusy || refreshingModels;
       profilePicker.value = State.settings.agentProfile;
@@ -519,14 +581,17 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
       const newRecentKey = JSON.stringify(State.savedChats.map(chat => [chat.id, chat.updatedAt]));
       if (newRecentKey !== recentKey) {
         recentKey = newRecentKey;
-        recentPicker.replaceChildren(h("option", { value: "", text: "Recent chats" }), ...State.savedChats.map(chat => h("option", { value: chat.id, text: chat.title })));
+        recentPicker.replaceChildren(h("option", { value: "", text: "Recent chats" }), ...State.savedChats.map(chat => h("option", { value: chat.id, text: `${chat.parentId ? "Branch: " : ""}${chat.title}` })));
       }
       recentPicker.disabled = State.chatBusy || State.voiceBusy || !State.savedChats.length;
       const newQueueKey = JSON.stringify([State.promptQueue, State.chatBusy]);
       if (newQueueKey !== queueKey) {
         queueKey = newQueueKey;
         queued.replaceChildren(...State.promptQueue.map(item => h("div", { class: "queued-message" },
-          h("span", { text: item.text, title: item.text }), h("button", { class: "chat-reset", title: "Remove queued message", "aria-label": "Remove queued message", onclick: () => {
+          h("span", { text: item.text, title: item.text }), h("button", { class: "link-btn", text: "Edit", onclick: () => {
+            const text = window.prompt("Edit queued message", item.text);
+            if (text?.trim()) { item.text = text.trim(); State.notify(); }
+          } }), h("button", { class: "chat-reset", title: "Remove queued message", "aria-label": "Remove queued message", onclick: () => {
             State.promptQueue = State.promptQueue.filter(message => message.id !== item.id); State.notify(); onHeightChange();
           } }, svg(ICONS.xmark, 10)))));
         if (!State.chatBusy && State.promptQueue.length) queued.append(h("button", { class: "link-btn", text: "Run queued messages", onclick: () => {
@@ -554,13 +619,23 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
             State.droppedFile = null; State.promptContext = null; State.notify(); onHeightChange();
           } }, svg(ICONS.xmark, 10))));
       }
-      const key = JSON.stringify(State.chatHistory) + State.chatStatus;
+      const key = JSON.stringify(State.chatHistory) + State.chatStatus + State.chatBusy + resetting;
       if (key !== renderedKey) {
         const follow = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
         const previousTop = log.scrollTop;
         renderedKey = key;
         clear(log);
-        for (const message of State.chatHistory) if (message.content) log.append(bubble(message, sources.get(message.id)));
+        for (const message of State.chatHistory) if (message.content) {
+          const row = bubble(message, sources.get(message.id));
+          const actions = h("div", { class: "message-actions" });
+          for (const action of ["branch", "edit", ...(message.role === "assistant" ? ["regenerate"] : [])] as const) {
+            const button = h("button", { class: "link-btn", text: action === "regenerate" ? "Regenerate (selected model)" : action === "edit" ? "Edit" : "Branch", onclick: () => void branch(message, action as "branch" | "edit" | "regenerate") }) as HTMLButtonElement;
+            button.disabled = State.chatBusy || State.voiceBusy || resetting;
+            actions.append(button);
+          }
+          if (message.status === "stopped") actions.append(h("span", { text: "Stopped" }));
+          row.append(actions); log.append(row);
+        }
         status.textContent = State.chatStatus;
         log.scrollTop = follow ? log.scrollHeight : previousTop;
       }

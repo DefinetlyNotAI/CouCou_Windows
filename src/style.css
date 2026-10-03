@@ -1510,3 +1510,8 @@ input[type="range"]::-webkit-slider-thumb {
 .chat-task:hover { color: var(--ink); }
 .chat-task i { width: 5px; height: 5px; border-radius: 50%; }
 .chat-task span:last-child { margin-left: auto; }
+.chat-row { flex-wrap: wrap; }
+.message-actions { display: flex; flex: 1 0 100%; gap: 10px; color: var(--dim); font-size: 10px; margin-top: 3px; }
+.chat-row.user .message-actions { justify-content: flex-end; }
+.message-actions button { font-size: 10px; }
+.message-actions button:disabled { opacity: .4; }

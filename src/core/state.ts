@@ -31,6 +31,8 @@ export interface ChatMessage {
   id: number;
   role: "user" | "assistant";
   content: string;
+  file?: { name: string; path: string };
+  status?: "complete" | "stopped";
 }
 
 export interface SavedChat {
@@ -38,6 +40,9 @@ export interface SavedChat {
   title: string;
   updatedAt: number;
   messages: ChatMessage[];
+  models?: { ollama: string; browser: string };
+  parentId?: string;
+  branchMessageId?: number;
 }
 
 export interface MascotHandoff {
@@ -164,6 +169,10 @@ class AppState {
   chatHistory: ChatMessage[] = [];
   chatId: string = crypto.randomUUID();
   savedChats: SavedChat[] = [];
+  chatModels: { ollama: string; browser: string } | null = null;
+  chatParentId: string | undefined;
+  chatBranchMessageId: number | undefined;
+  streamResponses = true;
   chatBusy = false;
   voiceBusy = false;
   promptQueue: { id: string; text: string; file: { name: string; path: string } | null }[] = [];
@@ -205,10 +214,22 @@ class AppState {
   saveChat() {
     if (!this.chatHistory.length) return;
     const title = this.chatHistory.find(message => message.role === "user")?.content.slice(0, 80) || "Chat";
-    const chat = { id: this.chatId, title, updatedAt: Date.now(), messages: this.chatHistory.map(message => ({ ...message })) };
+    const chat: SavedChat = { id: this.chatId, title, updatedAt: Date.now(), messages: structuredClone(this.chatHistory),
+      models: this.chatModels ? { ...this.chatModels } : undefined, parentId: this.chatParentId, branchMessageId: this.chatBranchMessageId };
     this.savedChats = [chat, ...this.savedChats.filter(item => item.id !== chat.id)];
     try { localStorage.setItem("coucou.chats", JSON.stringify(this.savedChats)); }
     catch { this.chatStatus = "Chat storage is full. This conversation could not be saved."; }
+  }
+
+  branchChat(messageId: number, messages: ChatMessage[]) {
+    this.saveChat();
+    this.chatParentId = this.chatId;
+    this.chatBranchMessageId = messageId;
+    this.chatId = crypto.randomUUID();
+    this.chatHistory = structuredClone(messages);
+    this.promptQueue = [];
+    this.toolActivity = [];
+    this.saveChat();
   }
 
   startHandoff(handoff: Omit<MascotHandoff, "status">) {
