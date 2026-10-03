@@ -51,7 +51,7 @@ async fn embed(settings:&crate::settings::Settings,input:Vec<String>)->Result<Ve
     let result:Value=response.json().await.map_err(|error|error.to_string())?;
     serde_json::from_value(result["embeddings"].clone()).map_err(|error|format!("Embedding model returned invalid vectors: {error}"))
 }
-pub async fn run(app:&AppHandle,request:&crate::tools::ToolRequest)->Result<Value,String> {
+pub async fn run<R: tauri::Runtime>(app:&AppHandle<R>,request:&crate::tools::ToolRequest)->Result<Value,String> {
     let _lock=if request.name=="project.index" {Some(INDEX_LOCK.get_or_init(Default::default).try_lock().map_err(|_|"An index update is already running")?)} else {None};
     let id=request.input["projectId"].as_str().filter(|id|!id.is_empty()).unwrap_or(&request.project_id);
     let settings=app.state::<crate::Shared>().settings.lock().unwrap().clone();
@@ -109,4 +109,54 @@ pub async fn run(app:&AppHandle,request:&crate::tools::ToolRequest)->Result<Valu
     let bytes=serde_json::to_vec(&index).map_err(|error|error.to_string())?;
     crate::storage::write(&path,&bytes).map_err(|error|error.to_string())?;
     Ok(json!({"files":index.files.len(),"chunks":index.files.values().map(|file|file.chunks.len()).sum::<usize>(),"updated":updated,"bytes":bytes.len(),"skipped":skipped,"documentLineNote":"PDF and DOCX line references refer to extracted text."}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    #[ignore = "Requires running Ollama and the installed embedding model"]
+    fn live_project_index_search_and_incremental_changes() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let id = format!("index-test-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+            let root = std::env::temp_dir().join(&id);
+            std::fs::create_dir(&root).unwrap();
+            std::fs::write(root.join(".gitignore"), "ignored.txt\n").unwrap();
+            std::fs::write(root.join("ignored.txt"), "This file must never enter the index.").unwrap();
+            std::fs::write(root.join("notes.txt"), "Unique fixture: the greenhouse irrigation controller waters tomato plants.\nThe soil moisture sensor stops watering when the soil is wet.\n").unwrap();
+            std::fs::write(root.join("other.txt"), "The printer uses black ink cartridges.\n").unwrap();
+            let mut settings = crate::settings::Settings::default();
+            settings.projects.push(json!({"id":id,"name":"Index fixture","folder":root}));
+            let app = tauri::test::mock_app();
+            app.manage(crate::Shared { settings: Mutex::new(settings), gate: Arc::new(crate::island::PollGate::new()) });
+            let mut request = crate::tools::ToolRequest { name: "project.index".into(), input: json!({}), chat_id: "index-test".into(), project_id: id.clone() };
+            let first = run(app.handle(), &request).await.unwrap();
+            assert_eq!(first["files"], 2, "{first}");
+            assert_eq!(first["updated"], 2);
+            assert_eq!(run(app.handle(), &request).await.unwrap()["updated"], 0);
+            let persisted = index_path(&id).unwrap();
+            assert!(!String::from_utf8_lossy(&std::fs::read(&persisted).unwrap()).contains("Unique fixture"));
+            request.name = "project.search".into();
+            request.input = json!({"query":"How is greenhouse watering controlled?"});
+            let results = run(app.handle(), &request).await.unwrap();
+            let entries = results["results"].as_array().unwrap();
+            assert!(entries.iter().any(|entry| entry["text"].as_str().unwrap().contains("irrigation")), "{results}");
+            assert!(entries.iter().all(|entry| entry["startLine"].as_u64().unwrap() > 0 && entry["score"].as_f64().unwrap().is_finite()));
+            std::fs::write(root.join("notes.txt"), "Unique fixture: the irrigation controller now uses a timer.\n").unwrap();
+            request.name = "project.index".into();
+            request.input = json!({});
+            assert_eq!(run(app.handle(), &request).await.unwrap()["updated"], 1);
+            let resolved = std::fs::canonicalize(&root).unwrap();
+            assert!(resolved.starts_with(std::fs::canonicalize(std::env::temp_dir()).unwrap()));
+            std::fs::remove_file(resolved.join("other.txt")).unwrap();
+            let after_delete = run(app.handle(), &request).await.unwrap();
+            assert_eq!(after_delete["files"], 1);
+            assert_eq!(after_delete["updated"], 0);
+            assert!(persisted.starts_with(crate::platform::local_dir().join("indexes")));
+            std::fs::remove_file(persisted).unwrap();
+            std::fs::remove_dir_all(resolved).unwrap();
+        });
+    }
 }
