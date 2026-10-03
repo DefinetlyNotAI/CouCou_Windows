@@ -4,6 +4,7 @@ import type { BotEmoteName, BotStateName, IslandMode, IslandViewName } from "./l
 import type { EyeShape } from "../mochi/engine";
 import type { AgentProfile } from "./agents";
 import type { Project } from "./projects";
+import type { AgentRun } from "./runs";
 
 export type AgentSource = "ollama" | "n8n";
 export type PillBadge = "finished" | "error";
@@ -51,6 +52,7 @@ export interface SavedChat {
   branchMessageId?: number;
   projectId?: string;
   toolResults?: { tool:string; content:string }[];
+  runs?:AgentRun[];
 }
 
 export interface MascotHandoff {
@@ -203,6 +205,7 @@ class AppState {
   promptQueue: { id: string; text: string; file: { name: string; path: string } | null }[] = [];
   toolActivity: { tool: string; phase: string; text: string }[] = [];
   toolResults: { tool:string; content:string }[] = [];
+  runs:AgentRun[]=[];
   quickActionsExpanded = false;
   toolActivityExpanded = false;
   chatStatus = "";
@@ -241,7 +244,7 @@ class AppState {
     if (!this.chatHistory.length) return;
     const title = this.chatHistory.find(message => message.role === "user")?.content.slice(0, 80) || "Chat";
     const chat: SavedChat = { id: this.chatId, title, updatedAt: Date.now(), messages: structuredClone(this.chatHistory),
-      models: this.chatModels ? { ...this.chatModels } : undefined, parentId: this.chatParentId, branchMessageId: this.chatBranchMessageId, projectId: this.chatProjectId, toolResults: structuredClone(this.toolResults) };
+      models: this.chatModels ? { ...this.chatModels } : undefined, parentId: this.chatParentId, branchMessageId: this.chatBranchMessageId, projectId: this.chatProjectId, toolResults: structuredClone(this.toolResults),runs:structuredClone(this.runs) };
     this.savedChats = [chat, ...this.savedChats.filter(item => item.id !== chat.id)];
     try { localStorage.setItem("coucou.chats", JSON.stringify(this.savedChats)); }
     catch { this.chatStatus = "Chat storage is full. This conversation could not be saved."; }

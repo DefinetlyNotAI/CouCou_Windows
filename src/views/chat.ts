@@ -49,6 +49,7 @@ export async function reopenChat(id: string): Promise<boolean> {
     State.promptQueue = [];
     State.toolActivity = [];
     State.toolResults = structuredClone(chat.toolResults ?? []);
+    State.runs=structuredClone(chat.runs ?? []);
     State.notify();
     return true;
   } catch (error) {
@@ -95,6 +96,8 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   const permissionPanel = h("div", { class: "tool-permissions" });
   const contextInspector=buildContext(()=>void updateContext(),()=>void summarizeContext(),()=>void clearContext(),()=>resetting);
   void onEvent<{ id: string; category: string; request: { name: string; input: unknown; chatId: string; projectId: string } }>("tool-permission", event => {
+    const run=State.runs.find(run=>run.id===State.chatRequestId);
+    if(run)run.permissions.push({id:event.id,tool:event.request.name,category:event.category});
     State.view = "prompt"; State.mode = "expanded";
     const detail = h("pre", { text: JSON.stringify(event.request.input, null, 2) });
     const row = h("div", { class: "tool-permission" }, h("strong", { text: `${event.request.name} · ${event.category}` }), detail);
@@ -106,7 +109,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
         deciding = true;
         try { await Bridge.toolDecision(event.id, decision); }
         catch (error) { State.chatStatus = String(error); }
-        finally { row.remove(); State.notify(); onHeightChange(); }
+        finally {const permission=run?.permissions.find(item=>item.id===event.id);if(permission)permission.decision=decision;row.remove(); State.notify(); onHeightChange(); }
       } }) as HTMLButtonElement;
       button.disabled = (decision === "project" && !event.request.projectId) || (decision === "chat" && !event.request.chatId);
       controls.append(button);
@@ -228,7 +231,13 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     State.notify();
   });
   quickMenu.append(projectPicker,indexProject,searchProject,searchWeb, screenshot, pasteClipboard, copyReply, streamMode, continueReply);
-  const workspace=buildWorkspace(el,contextInspector.el,activity,projectPicker);
+  const workspace=buildWorkspace(el,contextInspector.el,activity,projectPicker,paused=>void pauseRun(paused),stop);
+  async function pauseRun(paused:boolean) {
+    const id=State.chatRequestId;if(!id)return;
+    try {if(activeBackend==="browser")BrowserAI.pause(id,paused);else await Bridge.chatPause(paused);
+      const run=State.runs.find(run=>run.id===id);if(run)run.status=paused ? "paused" : "running";State.notify();
+    }catch(error){State.chatStatus=String(error);State.notify();}
+  }
   function currentModel() { return State.chatModels?.[State.settings.chatBackend] ?? (State.settings.chatBackend === "browser" ? State.settings.browserModel : State.settings.ollamaModel); }
   let refreshingModels = false;
   async function refreshModels() {
@@ -375,6 +384,11 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   const handleProgress = (event: ChatProgress) => {
     if (event.requestId !== State.chatRequestId || !State.chatBusy || stopping) return;
     const task = State.tasks.find(task => task.id === "integration_ollama");
+    const run=State.runs.find(run=>run.id===event.requestId);
+    if(run && !["streaming","metrics","tool-output","tool-call"].includes(event.phase))run.action=event.text;
+    if(event.phase==="tool-call") {
+      try {const call=JSON.parse(event.text);if(run)run.calls.push({name:call.name,input:call.input});}catch { }
+    }
     if (event.phase === "generating") {
       bufferedReply = "";
       if (assistant) assistant.content = "";
@@ -392,19 +406,22 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
       State.stateOverride = event.tool?.startsWith("web_") ? "searching" : "working";
       const tool = event.tool || event.actor?.name || "Tool";
       const service = INTEGRATION_AGENTS.find(item => tool.toLowerCase().includes(item.name.toLowerCase()));
-      const kind = event.actor?.kind ?? (event.phase.startsWith("agent-") ? "agent" : service ? "service" : /^mcp[._:/]/i.test(tool) ? "mcp" : "tool");
-      const name = event.actor?.name || service?.name || (kind === "mcp" ? tool.split(/[.:/]/)[1] || "MCP" : tool.startsWith("web_") ? "Web" : tool === "get_current_time" ? "Clock" : tool.replace(/_/g, " "));
+      const kind = event.actor?.kind ?? (event.phase.startsWith("agent-") || tool==="agent.delegate" ? "agent" : service ? "service" : /^mcp[._:/]/i.test(tool) ? "mcp" : "tool");
+      const name = event.actor?.name || service?.name || (kind==="agent" ? String(run?.calls.at(-1)?.input.name || "Helper") : kind === "mcp" ? tool.split(/[.:]/)[1] || "MCP" : /^web[._]/.test(tool) ? "Web" : tool === "get_current_time" ? "Clock" : tool.replace(/_/g, " "));
       const id = `${event.requestId}:${event.callId || tool}`;
       if (event.phase.endsWith("-start")) {
         const color = event.actor?.color && /^#[0-9a-f]{6}$/i.test(event.actor.color) ? event.actor.color : service?.color || (kind === "agent" ? "#2EC4A0" : "#38BDF8");
         State.startHandoff({ id, name, color, kind });
       } else State.finishHandoff(id, event.phase.endsWith("-error") ? "error" : "returning");
       if (task) State.appendStep(task.id, event.text);
+      if(event.phase.endsWith("error")) {const call=run?.calls.filter(call=>call.name===tool).at(-1);if(call)call.error=event.text;}
     } else if (event.phase === "metrics") {
       const speed = Number(event.text);
       State.tokensPerSecond = Number.isFinite(speed) && speed >= 0 ? speed : null;
     } else if(event.phase==="tool-output") {
       State.toolResults.push({tool:event.tool || "Tool",content:event.text}); State.toolResults=State.toolResults.slice(-100);
+      const call=run?.calls.filter(call=>call.name===event.tool && !call.result).at(-1);if(call)call.result=event.text;
+      if(event.tool==="agent.plan" && run) {try {const plan=JSON.parse(event.text);if(Array.isArray(plan.steps))run.plan=plan.steps.filter((step:unknown)=>typeof step==="string");}catch {}}
     } else if (event.phase === "loading" || event.phase === "thinking") {
       State.chatStatus = event.text;
     }
@@ -505,6 +522,8 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     const browserSettings={...settings,agentPrompt:project ? `${settings.agentPrompt}\n\nProject: ${project.name}\nFolder: ${project.folder}\nInstructions: ${project.instructions}\nMemory: ${project.memory}` : settings.agentPrompt};
     settings.ollamaModel = State.chatModels?.ollama ?? settings.ollamaModel;
     settings.browserModel = State.chatModels?.browser ?? settings.browserModel;
+    const run={id:requestId,goal:query,model:settings.chatBackend==="browser" ? settings.browserModel : settings.ollamaModel,startedAt:Date.now(),status:"running" as const,plan:[],action:"Starting",result:"",calls:[],permissions:[]};
+    State.runs.push(run);State.runs=State.runs.slice(-100);
     streamLive = State.streamResponses;
     bufferedReply = "";
     activeBackend = settings.chatBackend;
@@ -533,20 +552,23 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     let watchdog: number | null = null;
     try {
       const reply = await Promise.race([
-        listening.then(() => {
+        listening.then(async () => {
           if (State.chatRequestId !== requestId || stopping) throw new Error("Reply stopped.");
+          if(activeBackend!=="browser")await Bridge.chatPause(false);
           return activeBackend === "browser"
             ? BrowserAI.send(requestId, query, context, { ...browserSettings, browserModel:settings.browserModel, chatId: State.chatId, projectId:State.chatProjectId }, handleProgress)
             : Bridge.chatSend(requestId, query, context, settings.ollamaModel, State.chatId,State.chatProjectId);
         }),
         new Promise<never>((_, reject) => {
           const seconds = Math.max(30, Math.min(600, settings.chatTimeoutSeconds)) + (activeBackend === "browser" ? 605 : 5);
-          watchdog = window.setTimeout(() => reject(new Error("The reply timed out. Check the model backend or try a smaller model.")), seconds * 1000);
+          let remaining=seconds*1000;let last=performance.now();
+          watchdog = window.setInterval(()=> {const now=performance.now();if(State.runs.find(run=>run.id===requestId)?.status!=="paused")remaining-=now-last;last=now;if(remaining<=0)reject(new Error("The reply timed out. Check the model backend or try a smaller model."));},500);
         }),
       ]);
       if (State.chatRequestId !== requestId || State.chatHistory !== conversation) return false;
       replyMessage.content = reply.text;
       replyMessage.status = "complete";
+      const completedRun=State.runs.find(run=>run.id===requestId);if(completedRun){completedRun.status="complete";completedRun.result=reply.text;}
       if (State.droppedFile === file) { State.droppedFile = null; State.promptContext = null; }
       sources.set(replyMessage.id, reply.sources);
       State.chatStatus = "";
@@ -565,6 +587,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
       assistant = null;
       if (!replyMessage.content && queuedQuery === undefined && !input.value.trim()) input.value = query;
       State.chatStatus = String(err).replace(/^Error:\s*/, "");
+      const failedRun=State.runs.find(run=>run.id===requestId);if(failedRun){failedRun.status=stopping ? "stopped" : "error";failedRun.result=replyMessage.content || State.chatStatus;}
       if (task) { task.state = stopping ? "idle" : "error"; State.appendStep(task.id, State.chatStatus); }
       if (!stopping) Sound.play("error");
       return false;
@@ -593,6 +616,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     State.promptQueue = [];
     State.toolActivity = [];
     State.toolResults=[];
+    State.runs=[];
     if (State.chatBusy) stop();
     await turnFinished;
     await Bridge.chatReset();

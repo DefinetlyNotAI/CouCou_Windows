@@ -92,6 +92,16 @@ function appendSource(sources: ChatSource[], source: ChatSource) {
 }
 
 class BrowserAIClient {
+  private paused=false;
+  private pausePromise:Promise<void>|null=null;
+  private resumePause:(()=>void)|null=null;
+  pause(requestId:string,paused:boolean) {
+    if(this.active?.requestId!==requestId)return;
+    this.paused=paused;
+    if(paused && !this.pausePromise)this.pausePromise=new Promise(resolve=>{this.resumePause=resolve;});
+    if(!paused) {this.resumePause?.();this.pausePromise=null;this.resumePause=null;}
+  }
+  private async waitResume(active:ActiveTurn) {if(this.pausePromise)await Promise.race([this.pausePromise,active.cancelledPromise]);this.assertActive(active);}
   private history: ChatCompletionMessageParam[] = [];
   private engine: MLCEngineInterface | null = null;
   private worker: Worker | null = null;
@@ -137,6 +147,7 @@ class BrowserAIClient {
       done: Promise.resolve(),
     };
     this.active = active;
+    this.paused=false;this.pausePromise=null;this.resumePause=null;
 
     const work = this.run(active, query, context, settings);
     const result = Promise.race([work, cancelledPromise])
@@ -163,6 +174,7 @@ class BrowserAIClient {
       this.cancelledBeforeStart = requestId;
       return;
     }
+    this.pause(requestId,false);
     this.abort(active, new Error("Reply stopped."));
     await active.done;
   }
@@ -226,11 +238,13 @@ class BrowserAIClient {
     const timeoutSeconds = clampTimeout(settings.chatTimeoutSeconds);
     let timeoutId: number | undefined;
     const timeout = new Promise<never>((_resolve, reject) => {
-      timeoutId = globalThis.setTimeout(() => {
+      let remaining=timeoutSeconds*1000;let last=performance.now();
+      timeoutId = globalThis.setInterval(() => {
+        const now=performance.now();if(!this.paused)remaining-=now-last;last=now;if(remaining>0)return;
         const error = new Error(`The browser model took longer than ${timeoutSeconds} seconds. Try a smaller model or increase the request timeout in Settings.`);
         this.abort(active, error);
         reject(error);
-      }, timeoutSeconds * 1000);
+      }, 500);
     });
 
     const turn = this.generateTurn(active, engine, userContent, settings, webllm);
@@ -313,6 +327,7 @@ class BrowserAIClient {
 
     while (true) {
       this.assertActive(active);
+      await this.waitResume(active);
       this.progress(active, "generating", "Generating reply…");
       const completion = await engine.chat.completions.create({
         messages,
@@ -379,6 +394,7 @@ class BrowserAIClient {
       }
 
       for (const call of calls) {
+        await this.waitResume(active);
         this.assertActive(active);
         const name = call.function.name;
         if (!call.id || !tools.some((tool) => tool.function.name === name)) {
@@ -394,6 +410,7 @@ class BrowserAIClient {
           throw new Error(`The browser model returned invalid JSON arguments for ${name}.`);
         }
 
+        this.progress(active,"tool-call",JSON.stringify({name,input:args}),name);
         this.progress(active, "tool-start", `Running ${name}…`, name);
         const result = ALLOWED_TOOLS.has(name)
           ? await Bridge.browserTool(name, args)

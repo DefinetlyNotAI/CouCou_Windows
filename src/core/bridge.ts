@@ -68,6 +68,7 @@ export const Bridge = {
   chatSend: (requestId: string, query: string, context: ChatContext | null, model?: string, chatId?: string, projectId?: string) =>
     callOrThrow<{ text: string; sources: ChatSource[] }>("chat_send", { requestId, query, context, model, chatId, projectId }),
   chatCancel: (requestId: string) => call<void>("chat_cancel", { requestId }),
+  chatPause:(paused:boolean)=>callOrThrow<void>("chat_pause",{paused}),
   toolRun: (request: { name: string; input: Record<string, unknown>; chatId: string; projectId?: string }) => callOrThrow<unknown>("tool_run", { request }),
   toolDecision: (id: string, decision: string) => callOrThrow<void>("tool_decision", { id, decision }),
   projectAttach: (folder: string) => callOrThrow<{ folder:string; name:string; gitRepo:string }>("project_attach",{folder}),

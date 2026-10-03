@@ -227,6 +227,8 @@ async fn browser_tool(shared: State<'_, Shared>, name: String, arguments: serde_
 fn browser_context(context: ChatContext) -> Result<String, String> {
     ollama::browser_context(context)
 }
+#[tauri::command]
+fn chat_pause(chat:State<'_,Chat>,paused:bool) {chat.pause(paused);}
 
 #[tauri::command]
 async fn voice_run(voice: State<'_, voice::Voice>, request_id: String, mode: String, text: String, volume: u8) -> Result<serde_json::Value, String> {
@@ -431,6 +433,7 @@ pub fn run() {
             chat_reset,
             chat_restore,
             chat_cancel,
+            chat_pause,
             voice_run,
             voice_cancel,
             ollama_models,

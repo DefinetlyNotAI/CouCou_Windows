@@ -17,9 +17,15 @@ pub struct Chat {
     active: std::sync::Mutex<Option<(String, watch::Sender<bool>)>>,
     cancelled_before_start: std::sync::Mutex<Option<String>>,
     runtime: std::sync::Mutex<Option<(tauri::AppHandle, String, String)>>,
+    paused: std::sync::atomic::AtomicBool,
+    resume: tokio::sync::Notify,
 }
 
 impl Chat {
+    pub fn pause(&self, paused: bool) { self.paused.store(paused,std::sync::atomic::Ordering::Relaxed); if !paused {self.resume.notify_waiters();} }
+    async fn wait_resume(&self) {
+        loop {let notified=self.resume.notified();if !self.paused.load(std::sync::atomic::Ordering::Relaxed) {break;} notified.await;}
+    }
     pub fn set_runtime(&self, app: tauri::AppHandle, chat_id: String, project_id: String) {
         *self.runtime.lock().unwrap() = Some((app, chat_id, project_id));
     }
@@ -201,13 +207,17 @@ pub async fn send<F: Fn(ChatProgress) + Send + Sync>(
     }
     emit(progress(request_id, "loading", "Loading model…", None));
     let seconds = settings.chat_timeout_seconds.clamp(30, 600);
-    let result = tokio::select! {
-        result = tokio::time::timeout(std::time::Duration::from_secs(seconds),
-            run_turn(chat, settings, request_id, query, context, &emit)) => {
-            result.unwrap_or_else(|_| Err(format!("Ollama took longer than {seconds} seconds. Try a smaller model or increase the request timeout in Settings.")))
-        },
-        _ = cancelled.changed() => Err("Reply stopped.".into()),
-    };
+    let turn=run_turn(chat,settings,request_id,query,context,&emit);tokio::pin!(turn);
+    let mut timer=tokio::time::interval(std::time::Duration::from_millis(500));
+    let mut elapsed=std::time::Duration::ZERO;let mut last=std::time::Instant::now();
+    let result=loop {tokio::select! {
+        result=&mut turn => break result,
+        _=cancelled.changed() => break Err("Reply stopped.".into()),
+        _=timer.tick()=> {
+            let now=std::time::Instant::now();if !chat.paused.load(std::sync::atomic::Ordering::Relaxed) {elapsed+=now-last;}last=now;
+            if elapsed.as_secs()>=seconds {break Err(format!("Ollama took longer than {seconds} active seconds. Try a smaller model or increase the request timeout in Settings."));}
+        }
+    }};
     chat.active.lock().unwrap().take();
     match &result {
         Ok(_) => emit(progress(request_id, "finished", "Reply complete", None)),
@@ -268,6 +278,7 @@ async fn run_turn<F: Fn(ChatProgress) + Send + Sync>(
     let mut calls_used = 0;
     let mut sources = Vec::new();
     loop {
+        chat.wait_resume().await;
         emit(progress(request_id, "generating", "Generating reply…", None));
         let mut body = json!({"model":settings.ollama_model, "messages":messages, "stream":true, "options":{"num_predict":1024}});
         if let Some(agent) = settings.active_agent() {
@@ -307,6 +318,7 @@ async fn run_turn<F: Fn(ChatProgress) + Send + Sync>(
             );
         }
         for call in calls {
+            chat.wait_resume().await;
             let name = call
                 .get("function")
                 .and_then(|f| f.get("name"))
@@ -314,6 +326,7 @@ async fn run_turn<F: Fn(ChatProgress) + Send + Sync>(
                 .unwrap_or_default();
             let arguments =
                 call.get("function").and_then(|f| f.get("arguments")).cloned().unwrap_or(json!({}));
+            emit(progress(request_id,"tool-call",&json!({"name":name,"input":arguments}).to_string(),Some(name)));
             emit(progress(request_id, "tool-start", &format!("Running {name}…"), Some(name)));
             let result = if !tools.iter().any(|tool| tool["function"]["name"].as_str() == Some(name)) {
                 Err("Tool is disabled for this agent".into())

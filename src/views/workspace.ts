@@ -1,7 +1,8 @@
 import { h } from "./dom";
 import { Bridge,IS_TAURI } from "../core/bridge";
 import { State } from "../core/state";
-export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTMLElement,projectPicker:HTMLElement) {
+import { buildRuns } from "./runs";
+export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTMLElement,projectPicker:HTMLElement,pause:(paused:boolean)=>void,stop:()=>void) {
   const contextAnchor=document.createComment("context");context.before(contextAnchor);
   const activityAnchor=document.createComment("activity");activity.before(activityAnchor);
   const pickerAnchor=document.createComment("project");projectPicker.before(pickerAnchor);
@@ -11,6 +12,7 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
   const fileLabel=h("span",{text:"No file open"});
   const notice=h("div",{class:"workspace-notice",role:"status"});
   const runStatus=h("div",{class:"workspace-run"});
+  const runView=buildRuns(pause,stop,async()=> {try {const result=await tool("git.diff",{cwd:cwd()});output.textContent=String(result.stdout||"");}catch {}});
   const left=h("aside",{class:"workspace-pane workspace-left"},h("h3",{text:"Project"}),h("div",{class:"workspace-project-picker"}),h("h3",{text:"Files"}),fileTree);
   const right=h("aside",{class:"workspace-pane workspace-right"},h("h3",{text:"Context and tools"}));
   const script=h("textarea",{"aria-label":"PowerShell command",placeholder:"Enter a PowerShell command",spellcheck:"false"}) as HTMLTextAreaElement;
@@ -73,9 +75,10 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
   action("Build","powershell.run",()=>({script:"npm run build",cwd:cwd()}));
   const footer=h("section",{class:"workspace-pane workspace-bottom"},h("div",{class:"workspace-editor-header"},fileLabel,save),editor,
     h("h3",{text:"Terminal / Git / search / test logs"}),h("div",{class:"workspace-command-row"},script,search),terminalControls,notice,output);
-  right.append(runStatus);
+  right.append(runView.el,runStatus);
   root.prepend(left);root.append(right,footer);
   function sync() {
+    runView.sync();
     const enabled=State.fullscreen;
     projectPicker.dataset.workspaceBusy=String(busy);
     root.classList.toggle("full-workspace",enabled);
