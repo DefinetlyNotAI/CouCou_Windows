@@ -227,7 +227,9 @@ async fn run_turn<F: Fn(ChatProgress) + Send + Sync>(
     let runtime = chat.runtime.lock().unwrap().clone();
     let mut tools =
         if settings.tools_enabled && info.tools { settings.agent_tools(tool_schemas(key.is_some())) } else { Vec::new() };
-    if runtime.is_some() && settings.tools_enabled && info.tools { tools.extend(settings.agent_tools(crate::tools::schemas())); }
+    if runtime.is_some() && settings.tools_enabled && info.tools {
+        tools.extend(settings.agent_tools(crate::tools::schemas().into_iter().filter(|tool| settings.web_search_enabled || !tool["function"]["name"].as_str().unwrap_or_default().starts_with("web.")).collect()));
+    }
     let mut message = json!({ "role": "user", "content": query });
     {
         match context {
@@ -314,6 +316,11 @@ async fn run_turn<F: Fn(ChatProgress) + Send + Sync>(
             } else { execute_tool(name, &arguments, key.as_deref(), &mut sources).await };
             let content = match result {
                 Ok(value) => {
+                    if name.starts_with("web.") {
+                        if let Some(results) = value["results"].as_array() {
+                            for result in results { if let Some(url) = result["url"].as_str() { add_source(&mut sources,result["title"].as_str().unwrap_or(url),url); } }
+                        } else if let Some(url) = value["url"].as_str() { add_source(&mut sources,value["title"].as_str().unwrap_or(url),url); }
+                    }
                     emit(progress(
                         request_id,
                         "tool-result",

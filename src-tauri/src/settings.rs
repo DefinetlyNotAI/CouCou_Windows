@@ -47,11 +47,16 @@ pub struct Settings {
     pub agent_profiles: Vec<serde_json::Value>,
     #[serde(default)]
     pub tool_permissions: std::collections::HashMap<String,String>,
+    #[serde(default = "default_search_provider")]
+    pub search_provider: String,
+    #[serde(default)]
+    pub search_url: String,
 }
 
 fn enabled() -> bool {
     true
 }
+fn default_search_provider() -> String { "duckduckgo".into() }
 fn default_island_width() -> f64 { 640.0 }
 fn default_chat_height() -> f64 { 300.0 }
 fn default_island_position() -> f64 { 0.5 }
@@ -106,6 +111,8 @@ impl Default for Settings {
             agent_prompt: String::new(),
             agent_profiles: Vec::new(),
             tool_permissions: Default::default(),
+            search_provider: default_search_provider(),
+            search_url: String::new(),
         }
     }
 }

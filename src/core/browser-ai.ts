@@ -298,7 +298,7 @@ class BrowserAIClient {
     const tools = settings.toolsEnabled && supportsFunctionCalling
       ? [...await Bridge.browserTools(), ...await Bridge.toolSchemas()].filter(isChatTool).filter((tool) =>
           (!profile?.tools.length || profile.tools.includes(tool.function.name)) &&
-          (settings.webSearchEnabled || !tool.function.name.startsWith("web_")),
+          (settings.webSearchEnabled || !/^web[._]/.test(tool.function.name)),
         )
       : [];
     this.assertActive(active);

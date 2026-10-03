@@ -87,6 +87,8 @@ export interface Settings {
   agentPrompt: string;
   agentProfiles: AgentProfile[];
   toolPermissions: Record<string, string>;
+  searchProvider: string;
+  searchUrl: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -114,6 +116,8 @@ export const DEFAULT_SETTINGS: Settings = {
   agentPrompt: "",
   agentProfiles: [],
   toolPermissions: {},
+  searchProvider: "duckduckgo",
+  searchUrl: "",
 };
 
 type Listener = () => void;

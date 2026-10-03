@@ -4,6 +4,7 @@ mod ollama;
 mod voice;
 mod desktop;
 mod tools;
+mod web;
 mod permissions;
 mod files;
 mod island;
@@ -31,7 +32,10 @@ async fn tool_run(app: AppHandle, request: tools::ToolRequest) -> Result<serde_j
 #[tauri::command]
 fn tool_decision(id: String, decision: String) -> Result<(),String> { permissions::decide(id,decision) }
 #[tauri::command]
-fn tool_schemas() -> Vec<serde_json::Value> { tools::schemas() }
+fn tool_schemas(shared: State<'_, Shared>) -> Vec<serde_json::Value> {
+    let settings = shared.settings.lock().unwrap();
+    settings.agent_tools(tools::schemas().into_iter().filter(|tool| settings.web_search_enabled || !tool["function"]["name"].as_str().unwrap_or_default().starts_with("web.")).collect())
+}
 
 pub struct Shared {
     pub settings: Mutex<Settings>,

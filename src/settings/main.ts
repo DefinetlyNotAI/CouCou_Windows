@@ -305,6 +305,12 @@ function webSearchKeyControls(initialPresent: boolean, checkError: string): HTML
 }
 
 function chatOptionsSection(keyPresent: boolean, keyCheckError: string): HTMLElement {
+  const provider = h("select", { "aria-label": "Search provider" }) as HTMLSelectElement;
+  for (const [value,label] of [["duckduckgo","DuckDuckGo"],["searxng","SearXNG"],["custom","Custom JSON provider"],["browser","Open browser search"]]) provider.append(h("option",{value,text:label}));
+  provider.value = settings.searchProvider;
+  provider.addEventListener("change",() => { settings.searchProvider = provider.value; void save(); });
+  const searchUrl = h("input",{value:settings.searchUrl,"aria-label":"Search provider URL",placeholder:"http://localhost:8080/search"}) as HTMLInputElement;
+  searchUrl.addEventListener("change",() => { settings.searchUrl = searchUrl.value.trim(); void save(); });
   const timeout = h("input", {
     type: "number", min: "30", max: "600", step: "1",
     value: String(settings.chatTimeoutSeconds), style: "width:82px",
@@ -333,6 +339,8 @@ function chatOptionsSection(keyPresent: boolean, keyCheckError: string): HTMLEle
     h("h2", {}, h("span", { text: "Chat behavior" })),
     h("div", { class: "row" }, h("label", { text: "Tool calling" }), tools),
     h("div", { class: "row" }, h("label", { text: "Web search" }), webSearch),
+    h("div", { class: "row" }, h("label", { text: "Search provider" }), provider),
+    h("div", { class: "row" }, h("label", { text: "SearXNG / custom URL" }), searchUrl),
     h("div", { class: "row" }, h("label", { text: "Request timeout" }), timeout, h("span", { class: "hint", text: "seconds (30–600)" })),
     webSearchKeyControls(keyPresent, keyCheckError),
   );

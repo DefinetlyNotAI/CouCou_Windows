@@ -22,6 +22,8 @@ pub fn category(name: &str) -> Option<&'static str> {
         "system.clipboard.read" | "system.clipboard.write" => "clipboard",
         "system.screenshot" => "screen",
         "browser.open" => "browser",
+        "web.open" => "browser",
+        "web.search" | "web.fetch" | "web.extract" => "network",
         "http.request" | "github.request" | "vercel.request" => "network",
         _ => return None,
     })
@@ -46,6 +48,7 @@ pub fn schemas() -> Vec<Value> {
         ("vercel.request", "Call Vercel REST with the configured key; path begins with /", json!({"path":{"type":"string"},"method":{"type":"string"},"body":{}}), vec!["path"]),
     ];
     let mut tools: Vec<Value> = definitions.into_iter().map(|(name, description, properties, required)| json!({"type":"function","function":{"name":name,"description":description,"parameters":{"type":"object","properties":properties,"required":required,"additionalProperties":false}}})).collect();
+    tools.extend(crate::web::schemas());
     for operation in ["status", "diff", "log", "stage", "unstage", "commit", "branch"] {
         tools.push(json!({"type":"function","function":{"name":format!("git.{operation}"),"description":format!("Git {operation} in a repository"),"parameters":{"type":"object","properties":{"cwd":{"type":"string"},"files":{"type":"array","items":{"type":"string"}},"message":{"type":"string"},"branch":{"type":"string"}},"required":["cwd"]}}}));
     }
@@ -81,6 +84,12 @@ async fn ps(script: &str, input: &Value, cwd: Option<&str>) -> Result<Value, Str
 pub async fn execute(app: &AppHandle, request: &ToolRequest) -> Result<Value, String> {
     let input = &request.input;
     match request.name.as_str() {
+        "web.search" | "web.fetch" | "web.open" | "web.extract" => {
+            use tauri::Manager;
+            let settings = app.state::<crate::Shared>().settings.lock().unwrap().clone();
+            if !settings.web_search_enabled { return Err("Web access is disabled".into()); }
+            crate::web::run(&settings,&request.name,input).await
+        },
         "filesystem.read" => Ok(json!({"content":tokio::fs::read_to_string(path(input)?).await.map_err(|error| error.to_string())?})),
         "filesystem.write" => { tokio::fs::write(path(input)?, text(input,"content")?).await.map_err(|error| error.to_string())?; Ok(json!({"written":true})) },
         "filesystem.list" => {
