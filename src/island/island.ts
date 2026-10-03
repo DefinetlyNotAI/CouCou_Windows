@@ -465,6 +465,7 @@ export class Island {
       h: State.mode === "expanded" && State.view === "prompt"
         ? Math.min(State.settings.chatHeight, window.innerHeight,
           chatPromptHeight(State.chatHistory.length, State.settings.chatHeight)
+          + (State.chatStatus ? 34 : 0)
           + (State.quickActionsExpanded ? 110 : 0) + (State.toolActivityExpanded && State.toolActivity.length ? 70 : 0) + (State.promptQueue.length ? 50 : 0)) : h,
       r,
     };
