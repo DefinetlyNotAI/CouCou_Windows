@@ -90,8 +90,8 @@ export interface Settings {
   screen: "primary" | "cursor";
   autostart: boolean;
   hooksInstalled: boolean;
-  /** Claude model used by the chat. */
-  model: string;
+  ollamaUrl: string;
+  ollamaModel: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -105,7 +105,8 @@ export const DEFAULT_SETTINGS: Settings = {
   screen: "primary",
   autostart: false,
   hooksInstalled: false,
-  model: "claude-opus-5",
+  ollamaUrl: "http://127.0.0.1:11434",
+  ollamaModel: "",
 };
 
 type Listener = () => void;

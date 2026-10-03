@@ -80,6 +80,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       State.stateOverride = null;
       Sound.play("finish");
     } catch (err) {
+      State.chatHistory.pop();
       State.stateOverride = null;
       State.noteMessage = String(err).replace(/^Error:\s*/, "");
       State.view = "note";

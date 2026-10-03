@@ -6,7 +6,7 @@
 
 **Mochi doesn't get a notch on a PC — so it lives at the top of your screen instead.**
 
-Approve Claude Code permissions, watch your session work, drop a file, chat with Claude, keep an eye on your services — without leaving what you're doing.
+Chat with local models through Ollama, drop a file, keep an eye on your services, and optionally monitor Claude Code sessions — without leaving what you're doing.
 
 ![Windows 10/11](https://img.shields.io/badge/Windows-10%2F11-0078D4?logo=windows)
 ![Tauri 2](https://img.shields.io/badge/Tauri-2-FFC131?logo=tauri&logoColor=black)
@@ -68,11 +68,23 @@ in time, Coucou stays quiet and Claude Code asks in the terminal as usual.
 
 It works from any terminal — Windows Terminal, PowerShell, VS Code, Git Bash.
 
-## Chat and keys
+## Local chat with Ollama
 
-**Settings… → Claude** takes your Anthropic API key. Keys live in the **Windows
-Credential Manager**, never on disk and never in the interface — the island can
-only ask whether a key exists. Same for every integration key.
+Install [Ollama](https://ollama.com/download/windows), start it, and download a
+local model with `ollama pull <model>`. Open **Settings… → Ollama**, connect to
+`http://127.0.0.1:11434` (or your Ollama server), and select an installed model.
+Chat uses Ollama's [chat API](https://docs.ollama.com/api/chat); no Anthropic key
+or Claude subscription is needed. Existing preferences are preserved on upgrade;
+the old Claude model setting is ignored.
+
+Conversations support multiple turns and dropped UTF-8 text/code files up to
+200 KB. Images require a vision model. PDFs need text extraction first. Local
+chat has no web search. Missing models, connection problems, and unsupported
+attachments appear as errors in the island.
+
+Claude Code hooks are an independent, optional session integration; they do not
+provide the chat model. Other integration keys still live in the **Windows
+Credential Manager**, never in the interface or preferences file.
 
 No telemetry. The only network requests Coucou makes are to the services you
 configure yourself.
@@ -126,7 +138,7 @@ windows/
     island/            state machine, hooks, integrations
     views/             every island view
     settings/          the settings window
-  src-tauri/           Rust backend: window, named pipe, Claude API, pollers
+  src-tauri/           Rust backend: window, named pipe, Ollama API, pollers
   hook/                coucou-hook.exe, the Claude Code relay
   scripts/             icon generator
 ```

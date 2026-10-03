@@ -1,6 +1,6 @@
 // Coucou for Windows — app wiring and the commands the island calls.
 
-mod claude;
+mod ollama;
 mod files;
 mod hooks;
 mod integrations;
@@ -20,7 +20,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::{ManagerExt, MacosLauncher};
 
-use claude::{Chat, ChatContext, ChatReply};
+use ollama::{Chat, ChatContext, ChatReply};
 use files::DroppedFile;
 use hooks::{HookPreview, HookStatus};
 use island::{PollGate, ScreenInfo};
@@ -233,7 +233,7 @@ fn approval_decline(app: AppHandle, request_id: String) {
 
 // ── Chat, files and secrets ───────────────────────────────────────────────────
 
-/// One chat turn. The API key and any file bytes stay on the Rust side.
+/// One local chat turn. File bytes stay on the Rust side.
 #[tauri::command]
 async fn chat_send(
     shared: State<'_, Shared>,
@@ -241,13 +241,19 @@ async fn chat_send(
     query: String,
     context: Option<ChatContext>,
 ) -> Result<ChatReply, String> {
-    let model = shared.settings.lock().unwrap().model.clone();
-    claude::send(&chat, &model, query, context).await
+    let settings = shared.settings.lock().unwrap().clone();
+    ollama::send(&chat, &settings.ollama_url, &settings.ollama_model, query, context).await
 }
 
 #[tauri::command]
-fn chat_reset(chat: State<Chat>) {
-    chat.reset();
+async fn chat_reset(chat: State<'_, Chat>) -> Result<(), String> {
+    chat.reset().await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn ollama_models(url: String) -> Result<Vec<String>, String> {
+    ollama::models(&url).await
 }
 
 /// Copies a dropped file into the inbox and reports its name back.
@@ -393,6 +399,7 @@ pub fn run() {
             log_line,
             chat_send,
             chat_reset,
+            ollama_models,
             ingest_file,
             secret_present,
             secret_set,

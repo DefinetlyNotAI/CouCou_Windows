@@ -16,14 +16,15 @@ pub struct Settings {
     pub screen: String,
     pub autostart: bool,
     pub hooks_installed: bool,
-    /// Claude model used by the chat. Changeable in the settings window.
-    /// Defaulted explicitly so a settings.json written by an older build still loads.
-    #[serde(default = "default_model")]
-    pub model: String,
+    #[serde(default = "default_ollama_url")]
+    pub ollama_url: String,
+    // A separate field avoids treating an older build's Claude model as local.
+    #[serde(default)]
+    pub ollama_model: String,
 }
 
-fn default_model() -> String {
-    crate::claude::DEFAULT_MODEL.to_string()
+fn default_ollama_url() -> String {
+    "http://127.0.0.1:11434".into()
 }
 
 impl Default for Settings {
@@ -42,7 +43,8 @@ impl Default for Settings {
             screen: "primary".into(),
             autostart: false,
             hooks_installed: false,
-            model: default_model(),
+            ollama_url: default_ollama_url(),
+            ollama_model: String::new(),
         }
     }
 }
@@ -70,4 +72,20 @@ pub fn save(settings: &Settings) -> std::io::Result<()> {
     let json = serde_json::to_vec_pretty(settings)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     std::fs::write(settings_path(), json)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn old_claude_settings_preserve_preferences_and_default_to_local_chat() {
+        let mut old = serde_json::to_value(super::Settings::default()).unwrap();
+        old.as_object_mut().unwrap().remove("ollamaUrl");
+        old.as_object_mut().unwrap().remove("ollamaModel");
+        old["model"] = serde_json::json!("claude-opus-5");
+        old["soundVolume"] = serde_json::json!(0.08);
+        let settings: super::Settings = serde_json::from_value(old).unwrap();
+        assert_eq!(settings.ollama_url, "http://127.0.0.1:11434");
+        assert!(settings.ollama_model.is_empty());
+        assert_eq!(settings.sound_volume, 0.08);
+    }
 }
