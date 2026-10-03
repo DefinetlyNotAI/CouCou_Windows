@@ -1,6 +1,6 @@
 # CouCou implementation plan
 
-Status: stages 1–4 implemented; runtime verification remains partial as recorded below. Stage 5 is next. Preserve the full 20-stage scope and one implementation commit per stage. User requested no further test execution; use compilation and diff inspection only for subsequent stages.
+Status: stages 1–5 implemented; runtime verification remains partial as recorded below. Stage 6 is next. Preserve the full 20-stage scope and one implementation commit per stage. User requested no further test execution; use compilation and diff inspection only for subsequent stages.
 
 Stage 1 changes implemented so far: sanitized Markdown, scroll-position preservation during generation, removable attachments, uploads without chat reset, attachment context on later turns, removal of the 200 KB text cap, compact service mascots, chat-only TPS, 0–100% audio volume, exact island bounds for drag entry, native file picker, running-app picker, mascot hover-animation wake-up, and locally saved chats that reopen from recent activity with conversation text restored to either backend.
 
@@ -20,7 +20,9 @@ Stage 3: live/completed rendering, stopped partial replies retained, continue re
 
 Stage 4: stored editable agent profiles, personality controls, model selection, system instructions, tool allowlists, MCP server IDs, permission configuration, context size, temperature and workspace. Both model backends apply prompts, tool selections and generation parameters. Permission enforcement and MCP execution follow in stages 6 and 9. Frontend/native compilation passed; no tests executed.
 
-Stages 5–20 remain pending. Runtime checks listed above remain part of the full-goal verification scope; implementation commits do not claim those checks passed. The existing release installer predates these changes and needs rebuilding before delivery.
+Stage 5: shared structured request/schema/category/executor for filesystem, executable/PowerShell commands, processes, clipboard, screenshots, notifications, browser, HTTP, Git, and authenticated GitHub/Vercel requests. No arbitrary hooks executable exposed. Executor is internal until stage 6 adds approval routing; model access follows in stage 7. Native compilation passed; no tests executed.
+
+Stages 6–20 remain pending. Runtime checks listed above remain part of the full-goal verification scope; implementation commits do not claim those checks passed. The existing release installer predates these changes and needs rebuilding before delivery.
 
 ---
 

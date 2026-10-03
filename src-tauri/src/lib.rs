@@ -3,6 +3,7 @@
 mod ollama;
 mod voice;
 mod desktop;
+mod tools;
 mod files;
 mod island;
 mod integrations;
