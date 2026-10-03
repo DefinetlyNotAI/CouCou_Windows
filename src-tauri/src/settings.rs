@@ -54,12 +54,14 @@ pub struct Settings {
     #[serde(default)] pub mcp_servers: Vec<crate::mcp::Server>,
     #[serde(default)] pub projects: Vec<serde_json::Value>,
     #[serde(default)] pub active_project_id: String,
+    #[serde(default="default_embedding_model")] pub embedding_model:String,
 }
 
 fn enabled() -> bool {
     true
 }
 fn default_search_provider() -> String { "duckduckgo".into() }
+fn default_embedding_model() -> String {"embeddinggemma".into()}
 fn default_island_width() -> f64 { 640.0 }
 fn default_chat_height() -> f64 { 300.0 }
 fn default_island_position() -> f64 { 0.5 }
@@ -119,6 +121,7 @@ impl Default for Settings {
             mcp_servers: Vec::new(),
             projects: Vec::new(),
             active_project_id: String::new(),
+            embedding_model:default_embedding_model(),
         }
     }
 }

@@ -16,6 +16,7 @@ pub struct ToolRequest {
 pub fn category(name: &str) -> Option<&'static str> {
     Some(match name {
         "filesystem.read" | "filesystem.list" | "git.status" | "git.diff" | "git.log" => "read",
+        "project.index" | "project.search" => "read",
         "filesystem.write" | "git.stage" | "git.unstage" | "git.commit" | "git.branch" => "write",
         "terminal.run" | "powershell.run" | "system.process.kill" => "run",
         "system.process.list" | "system.notification.send" => "desktop",
@@ -52,6 +53,8 @@ pub fn schemas() -> Vec<Value> {
     ];
     let mut tools: Vec<Value> = definitions.into_iter().map(|(name, description, properties, required)| json!({"type":"function","function":{"name":name,"description":description,"parameters":{"type":"object","properties":properties,"required":required,"additionalProperties":false}}})).collect();
     tools.extend(crate::web::schemas());
+    tools.push(json!({"type":"function","function":{"name":"project.index","description":"Incrementally index a project with local embeddings respecting gitignore","parameters":{"type":"object","properties":{"projectId":{"type":"string"}}}}}));
+    tools.push(json!({"type":"function","function":{"name":"project.search","description":"Search project embeddings and return relevant file/line excerpts","parameters":{"type":"object","properties":{"projectId":{"type":"string"},"query":{"type":"string"}},"required":["query"]}}}));
     for operation in ["status", "diff", "log", "stage", "unstage", "commit", "branch"] {
         tools.push(json!({"type":"function","function":{"name":format!("git.{operation}"),"description":format!("Git {operation} in a repository"),"parameters":{"type":"object","properties":{"cwd":{"type":"string"},"files":{"type":"array","items":{"type":"string"}},"message":{"type":"string"},"branch":{"type":"string"}},"required":["cwd"]}}}));
     }
@@ -87,6 +90,7 @@ async fn ps(script: &str, input: &Value, cwd: Option<&str>) -> Result<Value, Str
 pub async fn execute(app: &AppHandle, request: &ToolRequest) -> Result<Value, String> {
     let input = &request.input;
     match request.name.as_str() {
+        "project.index" | "project.search" => crate::index::run(app,request).await,
         name if name.starts_with("mcp.") => crate::mcp::call(app,request).await,
         "web.search" | "web.fetch" | "web.open" | "web.extract" => {
             use tauri::Manager;

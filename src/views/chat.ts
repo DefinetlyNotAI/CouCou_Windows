@@ -201,6 +201,21 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   const streamMode = h("button", { class: "link-btn", text: "Stream live", onclick: () => { State.streamResponses = !State.streamResponses; State.notify(); } }) as HTMLButtonElement;
   const continueReply = h("button", { class: "link-btn", text: "Continue reply", onclick: () => launch("Continue your previous response from where you stopped. Avoid repeating it.", null) }) as HTMLButtonElement;
   const projectPicker = h("select", { class: "chat-picker", "aria-label":"Chat project" }) as HTMLSelectElement;
+  async function projectTool(name:"project.index"|"project.search") {
+    if(desktopBusy || !projectPicker.value) return;
+    const query=input.value.trim();if(name==="project.search" && !query) {input.focus();return;}
+    desktopBusy=true;State.chatStatus=name==="project.index" ? "Indexing project…" : "Searching project…";State.notify();
+    const id=`project:${crypto.randomUUID()}`;State.startHandoff({id,name:"Files",kind:"tool",color:"#38BDF8"});
+    try {
+      const result=await Bridge.toolRun({name,input:{projectId:projectPicker.value,...(query ? {query}: {})},chatId:State.chatId,projectId:projectPicker.value});
+      State.toolResults.push({tool:name,content:JSON.stringify(result,null,2)});State.saveChat();
+      State.chatStatus="Complete. Results are in Context → Tool result history.";State.finishHandoff(id);
+    } catch(error) {State.chatStatus=String(error);State.finishHandoff(id,"error");}
+    finally {desktopBusy=false;State.notify();onHeightChange();}
+  }
+  const indexProject=h("button",{class:"link-btn",text:"Index project",onclick:()=>void projectTool("project.index")}) as HTMLButtonElement;
+  const searchProject=h("button",{class:"link-btn",text:"Search project",onclick:()=>void projectTool("project.search")}) as HTMLButtonElement;
+  void onEvent<{projectId:string;completed:number;total:number}>("index-progress",event=> {if(desktopBusy && event.projectId===projectPicker.value && !State.chatBusy) {State.chatStatus=`Indexing project: ${event.completed}/${event.total}`;State.notify();}});
   projectPicker.addEventListener("change",async()=> {
     State.chatProjectId=projectPicker.value;
     State.settings.activeProjectId=projectPicker.value;
@@ -211,7 +226,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     try { if(IS_TAURI) await Bridge.saveSettings(State.settings); } catch(error) { State.chatStatus=String(error); }
     State.notify();
   });
-  quickMenu.append(projectPicker,searchWeb, screenshot, pasteClipboard, copyReply, streamMode, continueReply);
+  quickMenu.append(projectPicker,indexProject,searchProject,searchWeb, screenshot, pasteClipboard, copyReply, streamMode, continueReply);
   function currentModel() { return State.chatModels?.[State.settings.chatBackend] ?? (State.settings.chatBackend === "browser" ? State.settings.browserModel : State.settings.ollamaModel); }
   let refreshingModels = false;
   async function refreshModels() {
@@ -656,6 +671,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
       if(newProjectsKey!==projectsKey) { projectsKey=newProjectsKey; projectPicker.replaceChildren(h("option",{value:"",text:"No project"}),...State.settings.projects.map(project=>h("option",{value:project.id,text:project.name}))); }
       projectPicker.value=State.chatProjectId ?? State.settings.activeProjectId;
       projectPicker.disabled=State.chatBusy || State.voiceBusy || resetting;
+      indexProject.disabled=searchProject.disabled=!IS_TAURI || desktopBusy || State.chatBusy || !projectPicker.value;
       streamMode.setAttribute("aria-pressed", String(State.streamResponses));
       continueReply.disabled = State.chatBusy || State.voiceBusy || resetting || State.chatHistory.at(-1)?.role !== "assistant";
       const selectedModel = currentModel();

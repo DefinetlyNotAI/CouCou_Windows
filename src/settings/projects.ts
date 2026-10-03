@@ -7,6 +7,9 @@ export function projectsSection(settings: Settings, save: () => Promise<void>): 
   const folder = h("input",{"aria-label":"Project folder",placeholder:"C:\\Projects\\MyApp"}) as HTMLInputElement;
   const rows = h("div");
   const status = h("div",{class:"hint"});
+  const model=h("input",{value:settings.embeddingModel,"aria-label":"Local embedding model"}) as HTMLInputElement;
+  model.addEventListener("change",()=> {settings.embeddingModel=model.value.trim() || "embeddinggemma";void save();});
+  section.append(h("label",{class:"agent-field"},h("span",{text:"Local embedding model (install in Ollama first)"}),model));
   function render() {
     rows.replaceChildren(...settings.projects.map(project => {
       const row = h("details",{},h("summary",{text:project.name}));

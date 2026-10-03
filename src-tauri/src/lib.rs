@@ -6,6 +6,7 @@ mod desktop;
 mod tools;
 mod web;
 mod mcp;
+mod index;
 mod permissions;
 mod files;
 mod island;

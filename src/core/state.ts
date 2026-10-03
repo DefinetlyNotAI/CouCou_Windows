@@ -99,6 +99,7 @@ export interface Settings {
   mcpServers: { id: string; name: string; command: string; url: string; args: string[]; env: Record<string,string>; enabled: boolean; permissions: string }[];
   projects: Project[];
   activeProjectId: string;
+  embeddingModel: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -131,6 +132,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mcpServers: [],
   projects: [],
   activeProjectId: "",
+  embeddingModel: "embeddinggemma",
 };
 
 type Listener = () => void;
