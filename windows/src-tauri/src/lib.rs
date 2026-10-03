@@ -2,17 +2,13 @@
 
 mod ollama;
 mod files;
-mod hooks;
-mod integrations;
 mod island;
 mod log;
-mod pipe;
 mod platform;
 mod secrets;
 mod settings;
 mod tray;
 
-use std::process::Command;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
@@ -22,9 +18,7 @@ use tauri_plugin_autostart::{ManagerExt, MacosLauncher};
 
 use ollama::{Chat, ChatContext, ChatReply};
 use files::DroppedFile;
-use hooks::{HookPreview, HookStatus};
 use island::{PollGate, ScreenInfo};
-use pipe::Pending;
 use settings::Settings;
 
 pub struct Shared {
@@ -38,7 +32,6 @@ pub struct BootInfo {
     settings: Settings,
     screen: ScreenInfo,
     version: String,
-    hook_path: String,
     /// False where the OS has no global cursor (Wayland): the page then reports
     /// the cursor from its own mouse events.
     cursor_poll: bool,
@@ -46,21 +39,19 @@ pub struct BootInfo {
 
 #[tauri::command]
 fn boot(app: AppHandle, shared: State<Shared>) -> BootInfo {
-    let mut settings = shared.settings.lock().unwrap().clone();
-    // The real state of ~/.claude/settings.json wins over whatever we stored.
-    settings.hooks_installed = hooks::status().installed;
+    let settings = shared.settings.lock().unwrap().clone();
     let screen = island::screen_info(&app, &settings.screen);
     BootInfo {
         settings,
         screen,
         version: env!("CARGO_PKG_VERSION").to_string(),
-        hook_path: settings::hook_exe_path().to_string_lossy().to_string(),
         cursor_poll: platform::CURSOR_POLL,
     }
 }
 
 #[tauri::command]
-fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
+fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) -> Result<(), String> {
+    settings::save(&settings).map_err(|e| format!("Could not save settings: {e}"))?;
     let (screen_changed, autostart_changed) = {
         let mut current = shared.settings.lock().unwrap();
         let screen_changed = current.screen != settings.screen;
@@ -68,9 +59,6 @@ fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
         *current = settings.clone();
         (screen_changed, autostart_changed)
     };
-    if let Err(err) = settings::save(&settings) {
-        eprintln!("[coucou] could not save settings: {err}");
-    }
     if autostart_changed {
         let manager = app.autolaunch();
         let result = if settings.autostart { manager.enable() } else { manager.disable() };
@@ -84,6 +72,7 @@ fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
     }
     // Keep the other window in step (island ⇄ settings window).
     let _ = app.emit("settings-changed", settings);
+    Ok(())
 }
 
 /// Hidden island → shrink the window to the invisible wake strip and park the
@@ -132,103 +121,9 @@ fn open_url(url: String) {
     platform::open_url(&url);
 }
 
-/// "Open terminal" opens the working folder in VS Code when `code` is on PATH,
-/// and falls back to the file manager otherwise.
-#[tauri::command]
-fn open_in_vscode(path: Option<String>) -> bool {
-    // No shell anywhere near this. The path is a project folder chosen by
-    // whoever is using Claude Code, and a shell would happily read `&`, `^`, `%`
-    // or `$` in a folder name as syntax. Finding the launcher ourselves and
-    // handing the path over as a separate argument keeps it a path.
-    let path = path.filter(|p| !p.is_empty());
-    // It arrives in a hook payload: only an existing folder, given by its full
-    // path, goes any further. `code` would read `--something` as an option, and
-    // xdg-open would launch a file with whatever handles its type.
-    if let Some(p) = path.as_deref() {
-        let p = std::path::Path::new(p);
-        if !(p.is_absolute() && p.is_dir()) {
-            return false;
-        }
-    }
-    if let Some(code) = platform::find_on_path("code") {
-        let mut cmd = Command::new(code);
-        if let Some(p) = path.as_deref() {
-            cmd.arg(p);
-        }
-        if platform::no_console(&mut cmd).spawn().is_ok() {
-            return true;
-        }
-    }
-    if let Some(p) = path.as_deref() {
-        platform::reveal_folder(p);
-    }
-    false
-}
-
 #[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
-}
-
-/// Tray → Pause. Paused means paused: the pollers stop talking to the network,
-/// not just the island stopping showing things.
-#[tauri::command]
-fn set_paused(paused: bool) {
-    integrations::set_paused(paused);
-}
-
-// ── Claude Code hooks ─────────────────────────────────────────────────────────
-
-#[tauri::command]
-fn hooks_status() -> HookStatus {
-    hooks::status()
-}
-
-/// Returns the diff the user has to look at before anything is written.
-#[tauri::command]
-fn hooks_preview(install: bool) -> Result<HookPreview, String> {
-    hooks::preview(install)
-}
-
-/// Only ever called from an explicit click in the settings window.
-#[tauri::command]
-fn hooks_apply(
-    app: AppHandle,
-    shared: State<Shared>,
-    install: bool,
-    fingerprint: String,
-) -> Result<String, String> {
-    // The fingerprint comes from the preview the user actually looked at, so a
-    // settings.json that changed in between is refused rather than overwritten.
-    let backup = hooks::write(install, &fingerprint)?;
-    let updated = {
-        let mut current = shared.settings.lock().unwrap();
-        current.hooks_installed = install;
-        let _ = settings::save(&current);
-        current.clone()
-    };
-    let _ = app.emit("settings-changed", updated);
-    Ok(backup)
-}
-
-#[tauri::command]
-fn approval_decision(app: AppHandle, request_id: String, decision: String) {
-    pipe::answer(&app, &request_id, &decision);
-}
-
-/// The island has the card on screen, so the long wait for a human may begin.
-/// Until this arrives the relay only waits a few hundred milliseconds, which is
-/// what stops a paused or unresponsive island from freezing Claude Code.
-#[tauri::command]
-fn approval_ack(app: AppHandle, request_id: String) {
-    pipe::acknowledge(&app, &request_id);
-}
-
-/// Nobody can act on this request — the island is paused, or another card is
-/// already up. Claude Code falls back to asking in the terminal immediately.
-#[tauri::command]
-fn approval_decline(app: AppHandle, request_id: String) {
-    pipe::decline(&app, &request_id);
 }
 
 // ── Chat, files and secrets ───────────────────────────────────────────────────
@@ -236,13 +131,25 @@ fn approval_decline(app: AppHandle, request_id: String) {
 /// One local chat turn. File bytes stay on the Rust side.
 #[tauri::command]
 async fn chat_send(
+    app: AppHandle,
     shared: State<'_, Shared>,
     chat: State<'_, Chat>,
+    request_id: String,
     query: String,
     context: Option<ChatContext>,
 ) -> Result<ChatReply, String> {
     let settings = shared.settings.lock().unwrap().clone();
-    ollama::send(&chat, &settings.ollama_url, &settings.ollama_model, query, context).await
+    ollama::send(&chat, &settings, &request_id, query, context, |event| {
+        if !matches!(event.phase.as_str(), "streaming" | "thinking") {
+            log::line(format!("ollama {} request={} tool={}", event.phase, event.request_id, event.tool.as_deref().unwrap_or("")));
+        }
+        let _ = app.emit_to(island::WINDOW_LABEL, "chat-progress", event);
+    }).await
+}
+
+#[tauri::command]
+fn chat_cancel(chat: State<'_, Chat>, request_id: String) {
+    chat.cancel(Some(&request_id));
 }
 
 #[tauri::command]
@@ -254,6 +161,11 @@ async fn chat_reset(chat: State<'_, Chat>) -> Result<(), String> {
 #[tauri::command]
 async fn ollama_models(url: String) -> Result<Vec<String>, String> {
     ollama::models(&url).await
+}
+
+#[tauri::command]
+async fn ollama_model_info(url: String, model: String) -> Result<ollama::ModelInfo, String> {
+    ollama::model_info(&url, &model).await
 }
 
 /// Copies a dropped file into the inbox and reports its name back.
@@ -276,20 +188,6 @@ fn secret_set(key: String, value: String) -> Result<(), String> {
 #[tauri::command]
 fn secret_clear(key: String) -> Result<(), String> {
     secrets::clear(&key)
-}
-
-/// Opens the configured n8n instance — the URL lives in the Credential Manager.
-#[tauri::command]
-fn open_n8n() {
-    if let Some(url) = secrets::get("n8n-url") {
-        open_url(url);
-    }
-}
-
-/// Refresh buttons in the integration cards.
-#[tauri::command]
-async fn refresh_integration(app: AppHandle, id: String) {
-    integrations::poll_once(app, &id).await;
 }
 
 /// Lets the island write to the same log as the Rust side.
@@ -378,7 +276,6 @@ pub fn run() {
             settings: Mutex::new(loaded.clone()),
             gate: gate.clone(),
         })
-        .manage(Pending::default())
         .manage(Chat::default())
         .invoke_handler(tauri::generate_handler![
             boot,
@@ -388,26 +285,18 @@ pub fn run() {
             focus_window,
             reposition,
             open_url,
-            open_in_vscode,
             quit_app,
-            hooks_status,
-            hooks_preview,
-            hooks_apply,
-            approval_decision,
-            approval_ack,
-            approval_decline,
             log_line,
             chat_send,
             chat_reset,
+            chat_cancel,
             ollama_models,
+            ollama_model_info,
             ingest_file,
             secret_present,
             secret_set,
             secret_clear,
-            refresh_integration,
-            open_n8n,
             open_settings_window,
-            set_paused,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -430,9 +319,6 @@ pub fn run() {
             island::spawn_cursor_poll(handle.clone(), gate.clone());
 
             log::line(format!("--- Coucou {} started ---", env!("CARGO_PKG_VERSION")));
-            hooks::ensure_hook_exe(&handle);
-            pipe::start(handle.clone());
-            integrations::start(handle.clone());
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -11,16 +11,27 @@ pub struct Settings {
     pub sound_volume: f64,
     pub auto_close_interval: f64,
     pub absence_interval: f64,
-    pub active_integrations: Vec<String>,
     /// "primary" = the main display, "cursor" = whichever display the mouse is on.
     pub screen: String,
     pub autostart: bool,
-    pub hooks_installed: bool,
     #[serde(default = "default_ollama_url")]
     pub ollama_url: String,
-    // A separate field avoids treating an older build's Claude model as local.
+    // Separate from the older build's remote model preference.
     #[serde(default)]
     pub ollama_model: String,
+    #[serde(default = "enabled")]
+    pub tools_enabled: bool,
+    #[serde(default = "enabled")]
+    pub web_search_enabled: bool,
+    #[serde(default = "default_chat_timeout")]
+    pub chat_timeout_seconds: u64,
+}
+
+fn enabled() -> bool {
+    true
+}
+fn default_chat_timeout() -> u64 {
+    120
 }
 
 fn default_ollama_url() -> String {
@@ -34,26 +45,18 @@ impl Default for Settings {
             sound_volume: 0.12,
             auto_close_interval: 15.0,
             absence_interval: 180.0,
-            active_integrations: vec![
-                "integration_resend".into(),
-                "integration_n8n".into(),
-                "integration_vercel".into(),
-                "integration_github".into(),
-            ],
             screen: "primary".into(),
             autostart: false,
-            hooks_installed: false,
             ollama_url: default_ollama_url(),
             ollama_model: String::new(),
+            tools_enabled: true,
+            web_search_enabled: true,
+            chat_timeout_seconds: default_chat_timeout(),
         }
     }
 }
 
 pub use crate::platform::{config_dir, local_dir};
-
-pub fn hook_exe_path() -> PathBuf {
-    local_dir().join("bin").join(crate::platform::HOOK_EXE)
-}
 
 fn settings_path() -> PathBuf {
     config_dir().join("settings.json")
@@ -77,15 +80,20 @@ pub fn save(settings: &Settings) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn old_claude_settings_preserve_preferences_and_default_to_local_chat() {
+    fn older_settings_preserve_preferences_and_default_new_chat_controls() {
         let mut old = serde_json::to_value(super::Settings::default()).unwrap();
         old.as_object_mut().unwrap().remove("ollamaUrl");
         old.as_object_mut().unwrap().remove("ollamaModel");
-        old["model"] = serde_json::json!("claude-opus-5");
+        old.as_object_mut().unwrap().remove("toolsEnabled");
+        old.as_object_mut().unwrap().remove("webSearchEnabled");
+        old.as_object_mut().unwrap().remove("chatTimeoutSeconds");
+        old["activeIntegrations"] = serde_json::json!(["retired-integration"]);
         old["soundVolume"] = serde_json::json!(0.08);
         let settings: super::Settings = serde_json::from_value(old).unwrap();
         assert_eq!(settings.ollama_url, "http://127.0.0.1:11434");
         assert!(settings.ollama_model.is_empty());
         assert_eq!(settings.sound_volume, 0.08);
+        assert!(settings.tools_enabled);
+        assert_eq!(settings.chat_timeout_seconds, 120);
     }
 }

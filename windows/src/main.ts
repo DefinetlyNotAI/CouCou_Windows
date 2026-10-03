@@ -5,8 +5,6 @@ import { Bridge, IS_TAURI, onEvent } from "./core/bridge";
 import { Sound } from "./core/sound";
 import { State, type Settings } from "./core/state";
 import { Island } from "./island/island";
-import { registerHookHandlers } from "./island/hooks";
-import { registerIntegrationHandlers, refreshConfigured } from "./island/integrations";
 
 async function main() {
   const root = document.getElementById("root");
@@ -21,16 +19,14 @@ async function main() {
     State.settings = { ...State.settings, ...boot.settings };
   }
   island.applySettings();
-  State.loadIntegrationTasks();
   if (boot && !boot.cursorPoll) island.followPageCursor();
 
   await onEvent<{ x: number; y: number }>("cursor", ({ x, y }) => island.onCursor(x, y));
 
-  /** Pause has to reach Rust too, or the pollers keep calling out. */
+  /** Tray pause hides the island until the user explicitly opens it again. */
   const setPaused = (on: boolean) => {
     if (State.paused === on) return;
     State.paused = on;
-    void Bridge.setPaused(on);
   };
 
   await onEvent<string>("tray", (what) => {
@@ -57,12 +53,7 @@ async function main() {
   await onEvent<Settings>("settings-changed", (s) => {
     State.settings = { ...State.settings, ...s };
     island.applySettings();
-    State.loadIntegrationTasks();
-    void refreshConfigured();
   });
-
-  registerHookHandlers(island);
-  registerIntegrationHandlers(island);
 
   island.launch();
 

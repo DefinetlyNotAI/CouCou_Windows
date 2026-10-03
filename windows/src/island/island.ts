@@ -4,7 +4,7 @@
 import { Tracked, Spring, clamp } from "../core/anim";
 import { Bridge, IS_TAURI, onDragDrop } from "../core/bridge";
 import {
-  EXPANDED_CORNER, EXPANDED_W, NOTCH_W, PANEL_H, PANEL_W,
+  EXPANDED_CORNER, EXPANDED_W, NOTCH_W, PANEL_H, PANEL_W, WAKE_STRIP_H, WAKE_STRIP_W,
   ROUNDED_CORNER, VIEW_LAYOUTS, botGlowColor, botGlowOpacity, botPosition, chatPromptHeight,
   islandSize,
   type IslandMode, type IslandViewName,
@@ -13,7 +13,6 @@ import { Sound } from "../core/sound";
 import { State } from "../core/state";
 import { BotEngine, hexToRGB } from "../mochi/engine";
 import { Greeting } from "../mochi/greeting";
-import { createMiniBot, pruneMiniBots, syncMiniBotStates, tickMiniBots } from "../mochi/minibots";
 import { UploadCanvas } from "../upload/canvas";
 import { USC, UploadSeq } from "../upload/sequence";
 import { buildHeader, buildViews, type ViewActions, type ViewHost } from "../views/views";
@@ -43,7 +42,6 @@ export class Island {
   private botCanvas!: HTMLCanvasElement;
   private botGlow!: HTMLElement;
   private greetingCanvas!: HTMLCanvasElement;
-  private miniGrid!: HTMLElement;
   private countdown!: HTMLElement;
   private wakeStrip!: HTMLElement;
 
@@ -70,6 +68,7 @@ export class Island {
   private collapsed = false;
   private collapseTimer: number | null = null;
   private wasInIsland = false;
+  private suppressWakeUntilExit = false;
   /** Last shape handed to Rust for the click-through test. */
   private pushedRect = { x: -1, y: -1, w: -1, h: -1 };
   private homeCollapseAt: number | null = null;
@@ -106,47 +105,7 @@ export class Island {
   private build() {
     const actions: ViewActions = {
       setView: (v) => this.setView(v),
-      collapse: () => this.collapse(),
-      setFocus: (id) => {
-        State.setFocus(id);
-        Sound.play("blip");
-      },
-      openTerminal: () => {
-        const cwd = State.focusTask?.sessionCwd ?? null;
-        void Bridge.openInVSCode(cwd);
-      },
-      // The ↗ button — same targets as openAgentTarget() on macOS.
-      openTarget: () => {
-        const task = State.focusTask;
-        if (!task) return;
-        const urls: Record<string, string> = {
-          integration_resend: "https://resend.com/emails",
-          integration_vercel: "https://vercel.com/dashboard",
-          integration_github: "https://github.com",
-          integration_stripe: "https://dashboard.stripe.com/payments",
-          integration_notion: "https://notion.so",
-          integration_calcom: "https://app.cal.com/bookings",
-        };
-        if (task.id === "integration_claude") void Bridge.openInVSCode(task.sessionCwd ?? null);
-        else if (task.id === "integration_n8n") void Bridge.openN8n();
-        else if (urls[task.id]) void Bridge.openUrl(urls[task.id]);
-      },
-      openUrl: (url) => {
-        if (url) void Bridge.openUrl(url);
-      },
-      decide: (d) => {
-        const req = State.pendingApproval;
-        void Bridge.log(`decide ${d} req=${req?.requestId ?? "none"}`);
-        if (!req) return;
-        Sound.play(d === "deny" ? "blip" : "approve");
-        void Bridge.approvalDecision(req.requestId, d);
-        State.pendingApproval = null;
-        State.isPinned = false;
-        this.fsm.pinned = false;
-        State.updateTask("integration_claude", "working");
-        State.setPillBadge("integration_claude", null);
-        this.setView(State.defaultView());
-      },
+      minimize: () => this.minimize(),
       toggleSound: () => {
         State.settings.soundEnabled = !State.settings.soundEnabled;
         Sound.setEnabled(State.settings.soundEnabled);
@@ -173,7 +132,6 @@ export class Island {
     this.botGlow = h("div", { id: "bot-glow" });
     this.botCanvas = h("canvas", { id: "bot-canvas" });
     this.greetingCanvas = h("canvas", { id: "greeting-canvas" });
-    this.miniGrid = h("div", { id: "mini-grid" });
     this.countdown = h("div", { id: "countdown" });
 
     this.header = buildHeader(actions);
@@ -207,7 +165,6 @@ export class Island {
       this.clipEl,
       this.botGlow,
       this.botCanvas,
-      this.miniGrid,
       this.countdown,
     );
 
@@ -323,7 +280,14 @@ export class Island {
     this.fsm.forcePetit();
   }
 
-  /** Alert from the hook server: open on this view. Pinned alerts never auto-close. */
+  minimize() {
+    State.isPinned = false;
+    this.fsm.pinned = false;
+    this.suppressWakeUntilExit = true;
+    this.fsm.forceHidden();
+  }
+
+  /** Open a view directly from an app action, such as the tray or file drop. */
   alert(view: IslandViewName) {
     this.fsm.pinned = State.isPinned;
     this.fsm.forceHome();
@@ -389,7 +353,21 @@ export class Island {
     State.droppedFile = { name, path };
     State.promptContext = { kind: "file", name, path };
     State.chatHistory = [];
-    void Bridge.chatReset();
+    const requestId = State.chatRequestId;
+    State.chatRequestId = null;
+    State.chatBusy = false;
+    State.chatStatus = "";
+    State.stateOverride = null;
+    void (async () => {
+      if (requestId) {
+        try {
+          await Bridge.chatCancel(requestId);
+        } catch (error) {
+          void Bridge.log(`could not cancel chat request ${requestId}: ${String(error)}`);
+        }
+      }
+      await Bridge.chatReset();
+    })();
 
     UploadSeq.performDrop(State.uploadDuration);
     this.uploadTens = 0;
@@ -479,8 +457,6 @@ export class Island {
     this.islandEl.style.transform = `translateX(-50%)`;
     // These follow the island as it resizes, so they belong here rather than in
     // the state-driven DOM sync.
-    this.miniGrid.style.left = `${w - 40 - 14.5}px`;
-    this.miniGrid.style.top = `${hh / 2 - 14.5}px`;
     this.greetingCanvas.style.left = `${(w - EXPANDED_W) / 2}px`;
     this.uploadCanvas.el.style.left = `${(w - EXPANDED_W) / 2}px`;
 
@@ -528,7 +504,7 @@ export class Island {
     // The wake strip is the only thing the OS can hit while the island is hidden.
     this.wakeStrip.addEventListener("mouseenter", () => {
       Sound.resume();
-      if (State.mode === "hidden") this.fsm.mouseEntered();
+      if (!State.paused && !this.suppressWakeUntilExit && State.mode === "hidden") this.fsm.mouseEntered();
     });
 
     this.islandEl.addEventListener("mousedown", (e) => {
@@ -584,10 +560,19 @@ export class Island {
     const inIsland =
       x >= rect.x - HIT_MARGIN && x <= rect.x + rect.w + HIT_MARGIN &&
       y >= rect.y - HIT_MARGIN && y <= rect.y + rect.h + HIT_MARGIN;
+    const wakeStripLeft = (PANEL_W - WAKE_STRIP_W) / 2;
+    const inWakeStrip =
+      x >= wakeStripLeft && x <= wakeStripLeft + WAKE_STRIP_W &&
+      y >= 0 && y <= WAKE_STRIP_H;
+    const inWakeZone = inIsland || inWakeStrip;
+    if (this.suppressWakeUntilExit && !inWakeZone) this.suppressWakeUntilExit = false;
+    const mayWake = !State.paused && !this.suppressWakeUntilExit;
 
     if (inIsland && !this.wasInIsland) {
-      if (this.fsm.state === "coucou") this.greeting.hover();
-      this.fsm.mouseEntered();
+      if (mayWake) {
+        if (this.fsm.state === "coucou") this.greeting.hover();
+        this.fsm.mouseEntered();
+      }
       this.homeCollapseAt = null;
     }
     if (!inIsland && this.wasInIsland) {
@@ -716,7 +701,6 @@ export class Island {
     this.uploadCanvas.el.classList.toggle("on", uploadActive);
     this.viewsEl.classList.toggle("hidden-by-upload", uploadActive);
 
-    tickMiniBots(dt);
     this.views.get(State.view)?.tick?.(nowMs);
     if (UploadSeq.isActive) this.stepSequence();
     this.updateCountdown(nowMs);
@@ -860,23 +844,6 @@ export class Island {
       }
     }
 
-    // Compact mini grid
-    const showGrid = State.mode === "compact";
-    this.miniGrid.style.opacity = showGrid ? "1" : "0";
-    if (showGrid) {
-      const others = State.otherTasks.slice(0, 4);
-      const key = others.map((t) => t.id).join("|");
-      if (this.miniGrid.dataset.key !== key) {
-        this.miniGrid.dataset.key = key;
-        this.miniGrid.replaceChildren();
-        for (const t of others) {
-          this.miniGrid.append(createMiniBot(t, 13));
-        }
-        pruneMiniBots();
-      }
-    }
-
-    syncMiniBotStates(State.tasks);
     this.engine.setState(State.effectiveState);
   }
 

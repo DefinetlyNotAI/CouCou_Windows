@@ -3,6 +3,7 @@
 // The rest of the app calls `platform::…` and never touches Win32 or a Linux
 // API directly. Each OS file exposes the same functions; the compiler picks one.
 
+#[cfg(target_os = "linux")]
 use std::path::PathBuf;
 
 #[cfg(windows)]
@@ -25,7 +26,8 @@ pub struct LocalTime {
     pub second: u32,
 }
 
-/// The user's home directory, where `.claude/settings.json` lives.
+/// The user's home directory.
+#[cfg(target_os = "linux")]
 pub fn home_dir() -> PathBuf {
     std::env::var_os(HOME_VAR)
         .map(PathBuf::from)

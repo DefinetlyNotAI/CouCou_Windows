@@ -6,10 +6,6 @@
       "deb",
       "rpm"
     ],
-    "resources": {
-      "../target/release/coucou-hook.exe": null,
-      "../target/release/coucou-hook": "coucou-hook"
-    },
     "linux": {
       "appimage": {
         "bundleMediaFramework": true

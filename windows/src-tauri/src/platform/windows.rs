@@ -6,13 +6,10 @@ use std::process::Command;
 
 use tauri::{AppHandle, Manager, WebviewWindow};
 
-use ::windows::core::{BOOL, PWSTR};
-use ::windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, HWND, LPARAM, LocalFree, POINT};
-use ::windows::Win32::Security::Authorization::ConvertSidToStringSidW;
-use ::windows::Win32::Security::{GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER};
+use ::windows::core::BOOL;
+use ::windows::Win32::Foundation::{HWND, LPARAM, POINT};
 use ::windows::Win32::System::Ole::RevokeDragDrop;
 use ::windows::Win32::System::SystemInformation::GetLocalTime;
-use ::windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use ::windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
 use ::windows::Win32::UI::WindowsAndMessaging::{
     EnumChildWindows, GetClassNameW, GetCursorPos, GetWindowLongPtrW, SetWindowLongPtrW,
@@ -21,12 +18,6 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
 
 use super::LocalTime;
 use crate::island::WINDOW_LABEL;
-
-/// File name of the Claude Code relay.
-pub const HOOK_EXE: &str = "coucou-hook.exe";
-
-/// Environment variable holding the home directory.
-pub const HOME_VAR: &str = "USERPROFILE";
 
 /// Keeps spawned helpers from flashing a console window.
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -41,7 +32,7 @@ pub fn config_dir() -> PathBuf {
     base.join("Coucou")
 }
 
-/// %LOCALAPPDATA%\Coucou — where coucou-hook.exe, the inbox and the log live.
+/// %LOCALAPPDATA%\Coucou — the inbox and the log.
 pub fn local_dir() -> PathBuf {
     let base = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
@@ -79,70 +70,6 @@ pub fn no_console(cmd: &mut Command) -> &mut Command {
 pub fn open_url(url: &str) {
     let _ = no_console(Command::new("rundll32.exe").args(["url.dll,FileProtocolHandler", url]))
         .spawn();
-}
-
-pub fn reveal_folder(path: &str) {
-    let _ = Command::new("explorer").arg(path).spawn();
-}
-
-/// Our own `where`: walks %PATH% against %PATHEXT%, no shell involved.
-/// Rust quotes arguments correctly for `.cmd`/`.bat` targets since 1.77, so
-/// spawning `code.cmd` directly is safe.
-pub fn find_on_path(stem: &str) -> Option<PathBuf> {
-    let exts = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
-    let dirs = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&dirs) {
-        for ext in exts.split(';').filter(|e| !e.is_empty()) {
-            let candidate = dir.join(format!("{stem}{}", ext.to_lowercase()));
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-    }
-    None
-}
-
-// ── Who we are ────────────────────────────────────────────────────────────────
-//
-// Named pipes share one machine-wide namespace, so the SID in the name is what
-// keeps two accounts on the same machine from ever meeting on `coucou-*`.
-// coucou-hook computes the same string (hook/src/win.rs) and additionally checks
-// that the process serving the pipe really is us.
-
-/// The SID of the account this process runs as, as `S-1-5-21-…`.
-pub fn current_user_sid() -> Option<String> {
-    unsafe {
-        let mut token = HANDLE::default();
-        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).ok()?;
-
-        // First call sizes the buffer, second fills it.
-        let mut needed = 0u32;
-        let _ = GetTokenInformation(token, TokenUser, None, 0, &mut needed);
-        if needed == 0 {
-            let _ = CloseHandle(token);
-            return None;
-        }
-        let mut buf = vec![0u8; needed as usize];
-        let ok = GetTokenInformation(
-            token,
-            TokenUser,
-            Some(buf.as_mut_ptr().cast()),
-            needed,
-            &mut needed,
-        )
-        .is_ok();
-        let _ = CloseHandle(token);
-        if !ok {
-            return None;
-        }
-
-        let user = &*(buf.as_ptr() as *const TOKEN_USER);
-        let mut text = PWSTR::null();
-        ConvertSidToStringSidW(user.User.Sid, &mut text).ok()?;
-        let sid = text.to_string().ok();
-        let _ = LocalFree(Some(HLOCAL(text.0 as *mut _)));
-        sid
-    }
 }
 
 // ── Cursor ────────────────────────────────────────────────────────────────────

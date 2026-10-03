@@ -22,9 +22,6 @@ use tauri::{AppHandle, WebviewWindow};
 
 use super::{home_dir, LocalTime};
 
-/// File name of the Claude Code relay.
-pub const HOOK_EXE: &str = "coucou-hook";
-
 /// Environment variable holding the home directory.
 pub const HOME_VAR: &str = "HOME";
 
@@ -44,7 +41,7 @@ pub fn config_dir() -> PathBuf {
     xdg("XDG_CONFIG_HOME", ".config").join("coucou")
 }
 
-/// ~/.local/share/coucou — where coucou-hook, the inbox and the log live. The
+/// ~/.local/share/coucou — where the inbox and the log live. The
 /// relay has to sit at a stable path: an AppImage is mounted somewhere new on
 /// every launch.
 pub fn local_dir() -> PathBuf {
@@ -86,64 +83,15 @@ pub fn local_time() -> LocalTime {
 }
 
 /// Creates `dir` and closes it to other users. The log, the inbox of dropped
-/// files and the relay binary live under these directories; with the default
+/// files live under these directories; with the default
 /// umask they would come out 0755 and readable by anyone on the machine.
 pub fn ensure_private_dir(dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
 }
 
-/// True when `dir` is a real directory (not a symlink), owned by us, with no
-/// access for group or others: what `$XDG_RUNTIME_DIR` promises, checked
-/// rather than assumed, since the socket in it decides who can answer a
-/// permission request.
-fn is_private_dir(dir: &Path) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    std::fs::symlink_metadata(dir)
-        .map(|m| {
-            m.file_type().is_dir() && m.uid() == unsafe { libc::getuid() } && m.mode() & 0o077 == 0
-        })
-        .unwrap_or(false)
-}
-
-/// Where coucou-hook finds us: `$XDG_RUNTIME_DIR/coucou.sock`, or
-/// `/run/user/<uid>/coucou.sock` when the variable is missing. A directory
-/// that is not ours and private means no relay at all — never a fallback to a
-/// shared place like /tmp. Must match `socket_path()` in hook/src/unix.rs
-/// exactly.
-pub fn relay_socket_path() -> Option<PathBuf> {
-    let dir = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() })));
-    is_private_dir(&dir).then(|| dir.join("coucou.sock"))
-}
-
-// ── Processes ─────────────────────────────────────────────────────────────────
-
-/// Nothing to hide: a spawned process only gets a terminal if it asks for one.
-pub fn no_console(cmd: &mut Command) -> &mut Command {
-    cmd
-}
-
 pub fn open_url(url: &str) {
     let _ = Command::new("xdg-open").arg(url).spawn();
-}
-
-pub fn reveal_folder(path: &str) {
-    let _ = Command::new("xdg-open").arg(path).spawn();
-}
-
-/// Our own `which`: the first executable file named `stem` on $PATH.
-pub fn find_on_path(stem: &str) -> Option<PathBuf> {
-    let dirs = std::env::var_os("PATH")?;
-    std::env::split_paths(&dirs)
-        .map(|dir| dir.join(stem))
-        .find(|p| {
-            std::fs::metadata(p)
-                .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-                .unwrap_or(false)
-        })
 }
 
 // ── Cursor ────────────────────────────────────────────────────────────────────
