@@ -115,6 +115,49 @@ pub async fn run<R: tauri::Runtime>(app:&AppHandle<R>,request:&crate::tools::Too
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+    use std::io::Write;
+
+    #[test]
+    fn extracts_pdf_and_docx_text_for_indexing() {
+        let root = std::env::temp_dir().join(format!("coucou-documents-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir(&root).unwrap();
+        let docx = root.join("fixture.docx");
+        let mut archive = zip::ZipWriter::new(std::fs::File::create(&docx).unwrap());
+        let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        archive.start_file("word/document.xml", options).unwrap();
+        archive.write_all(br#"<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>First &amp; second</w:t></w:r></w:p><w:p><w:r><w:t>Readable paragraph</w:t></w:r></w:p></w:body></w:document>"#).unwrap();
+        archive.finish().unwrap();
+        let text = read_document(&docx).unwrap();
+        assert!(text.contains("First & second"), "{text}");
+        assert!(text.contains("Readable paragraph"), "{text}");
+        assert!(text.find("First & second").unwrap() < text.find("Readable paragraph").unwrap());
+
+        let stream = "BT /F1 12 Tf 72 720 Td (PDF fixture text) Tj ET\n";
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>".to_string(),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+            format!("<< /Length {} >>\nstream\n{stream}endstream", stream.len()),
+        ];
+        let mut pdf = String::from("%PDF-1.4\n");
+        let mut offsets = Vec::new();
+        for (index, object) in objects.iter().enumerate() {
+            offsets.push(pdf.len());
+            pdf.push_str(&format!("{} 0 obj\n{object}\nendobj\n", index + 1));
+        }
+        let xref = pdf.len();
+        pdf.push_str("xref\n0 6\n0000000000 65535 f \n");
+        for offset in offsets { pdf.push_str(&format!("{offset:010} 00000 n \n")); }
+        pdf.push_str(&format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"));
+        let path = root.join("fixture.pdf");
+        std::fs::write(&path, pdf).unwrap();
+        let text = read_document(&path).unwrap();
+        assert!(text.contains("PDF fixture text"), "{text}");
+        let resolved = std::fs::canonicalize(&root).unwrap();
+        assert!(resolved.starts_with(std::fs::canonicalize(std::env::temp_dir()).unwrap()));
+        std::fs::remove_dir_all(resolved).unwrap();
+    }
 
     #[test]
     #[ignore = "Requires running Ollama and the installed embedding model"]
