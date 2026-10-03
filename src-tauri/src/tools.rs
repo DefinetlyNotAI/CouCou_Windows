@@ -192,7 +192,12 @@ pub async fn execute(app: &AppHandle, request: &ToolRequest) -> Result<Value, St
             if request.name!="http.request" && !(200..300).contains(&status) {return Err(format!("Integration HTTP {status}: {}",body.chars().take(1000).collect::<String>()));}
             Ok(json!({"status":status,"body":body.chars().take(100000).collect::<String>()}))
         },
-        name if name.starts_with("git.") => {
+        name if name.starts_with("git.") => git(name, input).await,
+        _ => Err("Unknown Coucou tool".into()),
+    }
+}
+
+async fn git(name: &str, input: &Value) -> Result<Value, String> {
             let mut args: Vec<String> = match name {
                 "git.status" => vec!["status".into(),"--short".into(),"--branch".into()],
                 "git.diff" => if input["staged"].as_bool()==Some(true) {vec!["diff".into(),"--cached".into()]}else{vec!["diff".into()]}, "git.log" => vec!["log".into(),"-20".into(),"--oneline".into()],
@@ -213,7 +218,49 @@ pub async fn execute(app: &AppHandle, request: &ToolRequest) -> Result<Value, St
                 for file in files { args.push(file.as_str().ok_or("File paths must be strings")?.into()); }
             }
             command("git", &args, Some(text(input,"cwd")?), None).await
-        },
-        _ => Err("Unknown Coucou tool".into()),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn git_tools_stage_commit_switch_and_report_conflicts() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let root = std::env::temp_dir().join(format!("coucou-git-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+            std::fs::create_dir(&root).unwrap();
+            let cwd = root.to_str().unwrap();
+            for args in [vec!["init", "--initial-branch=main"], vec!["config", "user.name", "Coucou Test"], vec!["config", "user.email", "test@example.invalid"], vec!["config", "commit.gpgsign", "false"]] {
+                let result = command("git", &args.into_iter().map(str::to_string).collect::<Vec<_>>(), Some(cwd), None).await.unwrap();
+                assert_eq!(result["exitCode"], 0, "{result}");
+            }
+            let file = root.join("note.txt");
+            std::fs::write(&file, "base\n").unwrap();
+            let input = json!({"cwd":cwd,"files":["note.txt"],"message":"feat: initial fixture"});
+            assert_eq!(git("git.stage", &input).await.unwrap()["exitCode"], 0);
+            assert!(git("git.diff", &json!({"cwd":cwd,"staged":true})).await.unwrap()["stdout"].as_str().unwrap().contains("+base"));
+            assert_eq!(git("git.commit", &input).await.unwrap()["exitCode"], 0);
+            std::fs::write(&file, "main change\n").unwrap();
+            assert!(git("git.diff", &input).await.unwrap()["stdout"].as_str().unwrap().contains("+main change"));
+            assert_eq!(git("git.stage", &input).await.unwrap()["exitCode"], 0);
+            assert_eq!(git("git.unstage", &input).await.unwrap()["exitCode"], 0);
+            assert!(git("git.diff", &json!({"cwd":cwd,"staged":true})).await.unwrap()["stdout"].as_str().unwrap().is_empty());
+            assert_eq!(git("git.branch", &json!({"cwd":cwd,"branch":"topic","mode":"create"})).await.unwrap()["exitCode"], 0);
+            assert_eq!(git("git.stage", &input).await.unwrap()["exitCode"], 0);
+            assert_eq!(git("git.commit", &json!({"cwd":cwd,"message":"feat: main change"})).await.unwrap()["exitCode"], 0);
+            assert_eq!(git("git.branch", &json!({"cwd":cwd,"branch":"topic","mode":"switch"})).await.unwrap()["exitCode"], 0);
+            std::fs::write(&file, "topic change\n").unwrap();
+            assert_eq!(git("git.stage", &input).await.unwrap()["exitCode"], 0);
+            assert_eq!(git("git.commit", &json!({"cwd":cwd,"message":"feat: topic change"})).await.unwrap()["exitCode"], 0);
+            let merge = command("git", &["merge".into(), "main".into()], Some(cwd), None).await.unwrap();
+            assert_ne!(merge["exitCode"], 0);
+            assert_eq!(git("git.conflicts", &input).await.unwrap()["stdout"].as_str().unwrap().trim(), "note.txt");
+            assert!(git("git.status", &input).await.unwrap()["stdout"].as_str().unwrap().contains("UU note.txt"));
+            assert!(git("git.log", &input).await.unwrap()["stdout"].as_str().unwrap().contains("feat: topic change"));
+            assert!(git("git.stage", &json!({"cwd":cwd,"files":[]})).await.is_err());
+            let resolved = std::fs::canonicalize(&root).unwrap();
+            assert!(resolved.starts_with(std::fs::canonicalize(std::env::temp_dir()).unwrap()));
+            std::fs::remove_dir_all(resolved).unwrap();
+        });
     }
 }
