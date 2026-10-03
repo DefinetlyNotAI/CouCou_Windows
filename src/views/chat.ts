@@ -7,6 +7,7 @@ import { Sound } from "../core/sound";
 import { State, INTEGRATION_AGENTS, type ChatMessage } from "../core/state";
 import { profiles, selectAgent } from "../core/agents";
 import { buildContext } from "./context";
+import { buildWorkspace } from "./workspace";
 import type { ViewHost } from "./views";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
@@ -227,6 +228,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     State.notify();
   });
   quickMenu.append(projectPicker,indexProject,searchProject,searchWeb, screenshot, pasteClipboard, copyReply, streamMode, continueReply);
+  const workspace=buildWorkspace(el,contextInspector.el,activity,projectPicker);
   function currentModel() { return State.chatModels?.[State.settings.chatBackend] ?? (State.settings.chatBackend === "browser" ? State.settings.browserModel : State.settings.ollamaModel); }
   let refreshingModels = false;
   async function refreshModels() {
@@ -654,6 +656,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   return {
     el,
     sync() {
+      workspace.sync();
       contextInspector.sync();
       searchWeb.disabled = !IS_TAURI;
       screenshot.disabled = !IS_TAURI || desktopBusy;
@@ -670,7 +673,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
       const newProjectsKey=JSON.stringify(State.settings.projects.map(project=>[project.id,project.name]));
       if(newProjectsKey!==projectsKey) { projectsKey=newProjectsKey; projectPicker.replaceChildren(h("option",{value:"",text:"No project"}),...State.settings.projects.map(project=>h("option",{value:project.id,text:project.name}))); }
       projectPicker.value=State.chatProjectId ?? State.settings.activeProjectId;
-      projectPicker.disabled=State.chatBusy || State.voiceBusy || resetting;
+      projectPicker.disabled=State.chatBusy || State.voiceBusy || resetting || projectPicker.dataset.workspaceBusy==="true";
       indexProject.disabled=searchProject.disabled=!IS_TAURI || desktopBusy || State.chatBusy || !projectPicker.value;
       streamMode.setAttribute("aria-pressed", String(State.streamResponses));
       continueReply.disabled = State.chatBusy || State.voiceBusy || resetting || State.chatHistory.at(-1)?.role !== "assistant";

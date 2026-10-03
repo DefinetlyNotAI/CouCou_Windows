@@ -766,7 +766,9 @@ export class Island {
   };
 
   private updateBotTargets() {
-    const p = botPosition(State.mode, State.view, this.height.value, State.uploadProgress);
+    const p = State.fullscreen && State.view === "prompt"
+      ? { ...botPosition(State.mode, State.view, this.height.value, State.uploadProgress), cx: window.innerWidth / 2, cy: 18, diameter: 20 }
+      : botPosition(State.mode, State.view, this.height.value, State.uploadProgress);
     this.botCx.target = p.cx;
     this.botCy.target = p.cy;
     this.botSize.target = p.diameter / 0.6;

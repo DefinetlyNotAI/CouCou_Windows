@@ -1,6 +1,6 @@
 # CouCou implementation plan
 
-Status: stages 1–12 implementation landed; runtime verification remains partial as recorded below. Stage 13 is next. Preserve the full 20-stage scope and one implementation commit per stage. User requested no further test execution; use compilation and diff inspection only for subsequent stages.
+Status: stages 1–13 implementation landed; runtime verification remains partial as recorded below. Stage 14 is next. Preserve the full 20-stage scope and one implementation commit per stage. User requested no further test execution; use compilation and diff inspection only for subsequent stages.
 
 Stage 1 changes implemented so far: sanitized Markdown, scroll-position preservation during generation, removable attachments, uploads without chat reset, attachment context on later turns, removal of the 200 KB text cap, compact service mascots, chat-only TPS, 0–100% audio volume, exact island bounds for drag entry, native file picker, running-app picker, mascot hover-animation wake-up, and locally saved chats that reopen from recent activity with conversation text restored to either backend.
 
@@ -36,7 +36,9 @@ Stage 11: context inspector for system/agent/project instructions, memory, messa
 
 Stage 12: local Ollama embeddings, gitignore-aware folder traversal, per-project persisted indexes, content-hash incremental updates/deletion, bounded line chunks, semantic search with file/line excerpts, PDF/DOCX text extraction and skipped-file reporting. Index/search exposed as permission-gated tools and quick actions; configured embedding model must be installed. Large files are chunked rather than dumped into chat context. Frontend/native compilation passed; no tests or embedding runtime requests executed.
 
-Stages 13–20 remain pending. Runtime checks listed above remain part of the full-goal verification scope; implementation commits do not claim those checks passed. The existing release installer predates these changes and needs rebuilding before delivery.
+Stage 13: fullscreen file browser/editor with save and unsaved-change protection, terminal, Git status/diffs, semantic project search, test/lint/build command buttons/logs, tool/context sidebars and agent progress. Same permission-gated executor throughout. Mochi moves to the fullscreen header; island layout remains compact. Frontend/native compilation passed; no tests executed. UI/runtime journeys remain unverified; rich Agent Run controls follow in stage 14.
+
+Stages 14–20 remain pending. Runtime checks listed above remain part of the full-goal verification scope; implementation commits do not claim those checks passed. The existing release installer predates these changes and needs rebuilding before delivery.
 
 ---
 
