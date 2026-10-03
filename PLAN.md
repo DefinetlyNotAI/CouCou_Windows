@@ -2,6 +2,8 @@
 
 Status: implementation commits landed for all 20 stages. Runtime verification remains partial as recorded below; do not infer runtime completion from compilation. The user subsequently authorized tests; current evidence is recorded below.
 
+Fork synchronization audit: GitHub public API reports PR #1 closed and merged. A fresh git fetch origin main places the fork main tip at 0b3224f (the PR #1 merge). At local commit b16a222, HEAD is 32 commits ahead and 0 behind origin/main, so all current fork changes are included locally and no merge is required. Latest work remains unpublished because the active developer instruction prohibits pushing. GitHub CLI authentication is unavailable; this PR check used the public API and does not prove CouCou integration-key execution.
+
 Release refresh after acceptance repairs: npm run pack passed TypeScript/Vite production build, optimized Windows native build and NSIS packaging after commit 1e3bd7d. Both release installer aliases now include the project authorization scope fix and latest source. Installer remains CouCou Shahm Edition v0.1.1-ollama (8.74 MiB). The proposed UI redesign is not included; installation and remaining native/service acceptance are not claimed.
 
 Document extraction acceptance follow-up: the native document reader passed PDF text extraction and compressed DOCX paragraph/entity decoding checks using isolated temporary fixtures. Temporary files were removed after path confinement verification. This verifies these text-document parsing paths; scanned-document OCR and arbitrary document layouts are not claimed. The full native suite passed 15 tests with 3 optional live tests ignored.
