@@ -28,6 +28,7 @@ pub fn category(name: &str) -> Option<&'static str> {
         "web.open" => "browser",
         "web.search" | "web.fetch" | "web.extract" => "network",
         "http.request" | "github.request" | "vercel.request" => "network",
+        name if name.starts_with("github.") || name.starts_with("vercel.") => "network",
         name if name.starts_with("mcp.connect.http.") => "network",
         name if name.starts_with("mcp.connect.stdio.") => "run",
         name if name.starts_with("mcp.") => "desktop",
@@ -55,6 +56,7 @@ pub fn schemas() -> Vec<Value> {
     ];
     let mut tools: Vec<Value> = definitions.into_iter().map(|(name, description, properties, required)| json!({"type":"function","function":{"name":name,"description":description,"parameters":{"type":"object","properties":properties,"required":required,"additionalProperties":false}}})).collect();
     tools.extend(crate::web::schemas());
+    tools.extend(crate::services::schemas());
     tools.push(json!({"type":"function","function":{"name":"agent.plan","description":"Record a concrete plan for a multi-step task before executing it","parameters":{"type":"object","properties":{"steps":{"type":"array","items":{"type":"string"}}},"required":["steps"]}}}));
     tools.push(json!({"type":"function","function":{"name":"agent.delegate","description":"Ask an isolated local model helper to analyze a focused task. This helper has no tools.","parameters":{"type":"object","properties":{"goal":{"type":"string"},"model":{"type":"string"},"name":{"type":"string"}},"required":["goal"]}}}));
     tools.push(json!({"type":"function","function":{"name":"project.index","description":"Incrementally index a project with local embeddings respecting gitignore","parameters":{"type":"object","properties":{"projectId":{"type":"string"}}}}}));
@@ -94,6 +96,8 @@ async fn ps(script: &str, input: &Value, cwd: Option<&str>) -> Result<Value, Str
 }
 
 pub async fn execute(app: &AppHandle, request: &ToolRequest) -> Result<Value, String> {
+    let normalized=crate::services::normalize(request)?;
+    let request=normalized.as_ref().unwrap_or(request);
     let input = &request.input;
     match request.name.as_str() {
         "repository.search"=> {
@@ -178,6 +182,7 @@ pub async fn execute(app: &AppHandle, request: &ToolRequest) -> Result<Value, St
             let response = call.send().await.map_err(|error| error.to_string())?;
             let status = response.status().as_u16();
             let body = response.text().await.map_err(|error| error.to_string())?;
+            if request.name!="http.request" && !(200..300).contains(&status) {return Err(format!("Integration HTTP {status}: {}",body.chars().take(1000).collect::<String>()));}
             Ok(json!({"status":status,"body":body.chars().take(100000).collect::<String>()}))
         },
         name if name.starts_with("git.") => {

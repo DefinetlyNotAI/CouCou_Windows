@@ -1,6 +1,6 @@
 # CouCou implementation plan
 
-Status: stages 1–15 implementation landed; runtime verification remains partial as recorded below. Stage 16 is next. Preserve the full 20-stage scope and one implementation commit per stage. User requested no further test execution; use compilation and diff inspection only for subsequent stages.
+Status: stages 1–16 implementation landed; runtime verification remains partial as recorded below. Stage 17 is next. Preserve the full 20-stage scope and one implementation commit per stage. User requested no further test execution; use compilation and diff inspection only for subsequent stages.
 
 Stage 1 changes implemented so far: sanitized Markdown, scroll-position preservation during generation, removable attachments, uploads without chat reset, attachment context on later turns, removal of the 200 KB text cap, compact service mascots, chat-only TPS, 0–100% audio volume, exact island bounds for drag entry, native file picker, running-app picker, mascot hover-animation wake-up, and locally saved chats that reopen from recent activity with conversation text restored to either backend.
 
@@ -42,7 +42,9 @@ Stage 14: stored Agent Run history with goal/model/plan/current action/files/com
 
 Stage 15: Git status/working/staged diffs, stage/unstage, commits, branch list/create/switch, history and conflict-file links; literal repository search and file/line links; structured test/lint/build actions with configurable PowerShell commands; model file references open in the fullscreen editor. Commands remain permission gated. Frontend/native compilation passed; no tests executed; Git mutation/runtime journeys remain unverified.
 
-Stages 16–20 remain pending. Runtime checks listed above remain part of the full-goal verification scope; implementation commits do not claim those checks passed. The existing release installer predates these changes and needs rebuilding before delivery.
+Stage 16: structured and fullscreen GitHub issues/PRs/Actions/releases/repository search/draft PR creation/change review; Vercel deployments/build logs/domains/env/preview links/status/rollback. Existing secure keys and permission routing used; API failures propagate to tool errors. Frontend/native compilation passed. No external service reads or mutations executed during verification.
+
+Stages 17–20 remain pending. Runtime checks listed above remain part of the full-goal verification scope; implementation commits do not claim those checks passed. The existing release installer predates these changes and needs rebuilding before delivery.
 
 ---
 

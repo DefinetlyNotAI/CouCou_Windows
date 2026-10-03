@@ -2,6 +2,7 @@ import { h } from "./dom";
 import { Bridge,IS_TAURI } from "../core/bridge";
 import { State } from "../core/state";
 import { buildRuns } from "./runs";
+import { buildServices } from "./services";
 export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTMLElement,projectPicker:HTMLElement,pause:(paused:boolean)=>void,stop:()=>void) {
   const contextAnchor=document.createComment("context");context.before(contextAnchor);
   const activityAnchor=document.createComment("activity");activity.before(activityAnchor);
@@ -24,12 +25,12 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
   },true);
   async function tool(name:string,input:Record<string,unknown>) {
     const project=State.settings.projects.find(project=>project.id===State.chatProjectId);
-    if(!project) throw new Error("Select a project first");
+    if(!project && !/^(github|vercel)\./.test(name)) throw new Error("Select a project first");
     const chatId=State.chatId;
     busy=true;notice.textContent=`Running ${name}…`;sync();
     const id=`workspace:${crypto.randomUUID()}`;State.startHandoff({id,name:name.split('.')[0],kind:"tool",color:"#38BDF8"});
     try {
-      const result=await Bridge.toolRun({name,input,chatId:State.chatId,projectId:project.id});
+      const result=await Bridge.toolRun({name,input,chatId:State.chatId,projectId:project?.id || ""});
       if(State.chatId===chatId) {State.toolResults.push({tool:name,content:JSON.stringify(result,null,2)});State.toolResults=State.toolResults.slice(-100);State.saveChat();}
       State.finishHandoff(id);notice.textContent="";return result as Record<string,unknown>;
     } catch(error) {State.finishHandoff(id,"error");notice.textContent=String(error);throw error;}
@@ -90,7 +91,7 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
   action("Build","coding.build",()=>({...(script.value.trim()?{script:script.value}:{}),cwd:cwd()}));
   const footer=h("section",{class:"workspace-pane workspace-bottom"},h("div",{class:"workspace-editor-header"},fileLabel,save),editor,
     h("h3",{text:"Terminal / Git / search / test logs"}),h("div",{class:"workspace-command-row"},script,search),h("details",{},h("summary",{text:"Git actions"}),h("div",{class:"workspace-command-row"},gitFiles,commitMessage,branchName)),terminalControls,notice,outputFiles,output);
-  right.append(runView.el,runStatus);
+  right.append(runView.el,runStatus,buildServices(tool));
   root.prepend(left);root.append(right,footer);
   function sync() {
     runView.sync();
