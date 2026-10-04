@@ -14,22 +14,35 @@ fn index_path(id:&str)->Result<PathBuf,String> {
     let folder=crate::platform::local_dir().join("indexes"); crate::platform::ensure_private_dir(&folder).map_err(|error|error.to_string())?;
     Ok(folder.join(format!("{id}.json")))
 }
-fn read_document(path:&Path)->Result<String,String> {
-    match path.extension().and_then(|ext|ext.to_str()).unwrap_or_default().to_lowercase().as_str() {
-        "pdf" => pdf_extract::extract_text(path).map_err(|error|error.to_string()),
+pub(crate) fn read_document(path:&Path)->Result<String,String> {
+    let ext=path.extension().and_then(|ext|ext.to_str()).unwrap_or_default().to_lowercase();
+    if !matches!(ext.as_str(),"pdf"|"docx") {
+        let mut file=std::fs::File::open(path).map_err(|error|error.to_string())?;
+        let mut prefix=[0u8;8192];let count=file.read(&mut prefix).map_err(|error|error.to_string())?;
+        if prefix[..count].contains(&0) && !prefix[..count].starts_with(crate::storage::MAGIC) {return Err("Binary file".into());}
+    }
+    let bytes=crate::storage::read(path).map_err(|error|error.to_string())?;
+    match ext.as_str() {
+        "pdf" => pdf_extract::extract_text_from_mem(&bytes).map_err(|error|error.to_string()),
         "docx" => {
-            let file=std::fs::File::open(path).map_err(|error|error.to_string())?;
-            let mut archive=zip::ZipArchive::new(file).map_err(|error|error.to_string())?;
+            let mut archive=zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|error|error.to_string())?;
             let mut xml=String::new(); archive.by_name("word/document.xml").map_err(|error|error.to_string())?.read_to_string(&mut xml).map_err(|error|error.to_string())?;
             Ok(xml.split("</w:p>").map(|paragraph|scraper::Html::parse_fragment(paragraph).root_element().text().collect::<String>()).collect::<Vec<_>>().join("\n"))
         },
         _ => {
-            let mut file=std::fs::File::open(path).map_err(|error|error.to_string())?;
-            let mut prefix=[0u8;8192];let count=file.read(&mut prefix).map_err(|error|error.to_string())?;
-            if prefix[..count].contains(&0) {return Err("Binary file".into());}
-            std::fs::read_to_string(path).map_err(|error|error.to_string())
+            if bytes.iter().take(8192).any(|byte|*byte==0) {return Err("Binary file".into());}
+            String::from_utf8(bytes).map_err(|error|error.to_string())
         },
     }
+}
+pub(crate) fn document_page(path:&Path,offset:usize,limit:usize)->Result<Value,String> {
+    if !(1..=16000).contains(&limit) {return Err("Document page length must be 1–16000 characters".into());}
+    let text=read_document(path)?;
+    let total=text.chars().count();
+    if offset>total {return Err("Document offset is past the end of the file".into());}
+    let content:String=text.chars().skip(offset).take(limit).collect();
+    let end=offset+content.chars().count();
+    Ok(json!({"content":content,"offset":offset,"nextOffset":if end<total {Some(end)}else{None},"totalCharacters":total}))
 }
 fn chunks(text:&str)->Vec<Chunk> {
     let mut chunks=Vec::new(); let mut buffer=String::new(); let mut start=1; let mut end=1;
@@ -131,6 +144,9 @@ mod tests {
         assert!(text.contains("First & second"), "{text}");
         assert!(text.contains("Readable paragraph"), "{text}");
         assert!(text.find("First & second").unwrap() < text.find("Readable paragraph").unwrap());
+        let encrypted_docx=root.join("attachment.docx");
+        crate::storage::write(&encrypted_docx,&std::fs::read(&docx).unwrap()).unwrap();
+        assert_eq!(read_document(&encrypted_docx).unwrap(),text);
 
         let stream = "BT /F1 12 Tf 72 720 Td (PDF fixture text) Tj ET\n";
         let objects = [
@@ -154,6 +170,23 @@ mod tests {
         std::fs::write(&path, pdf).unwrap();
         let text = read_document(&path).unwrap();
         assert!(text.contains("PDF fixture text"), "{text}");
+        let encrypted_pdf=root.join("attachment.pdf");
+        crate::storage::write(&encrypted_pdf,&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(read_document(&encrypted_pdf).unwrap(),text);
+        let page=document_page(&encrypted_pdf,0,5).unwrap();
+        assert_eq!(page["content"].as_str().unwrap().chars().count(),5);
+        assert_eq!(page["nextOffset"],5);
+        assert!(document_page(&encrypted_pdf,0,0).is_err());
+        assert!(document_page(&encrypted_pdf,0,16001).is_err());
+        assert!(document_page(&encrypted_pdf,usize::MAX,100).is_err());
+        let unicode=root.join("unicode.txt");
+        crate::storage::write(&unicode,"A🙂漢B".as_bytes()).unwrap();
+        let page=document_page(&unicode,1,2).unwrap();
+        assert_eq!(page["content"],"🙂漢");
+        assert_eq!(page["nextOffset"],3);
+        let binary=root.join("binary.bin");
+        std::fs::write(&binary,[0u8,1,2]).unwrap();
+        assert!(read_document(&binary).is_err());
         let resolved = std::fs::canonicalize(&root).unwrap();
         assert!(resolved.starts_with(std::fs::canonicalize(std::env::temp_dir()).unwrap()));
         std::fs::remove_dir_all(resolved).unwrap();

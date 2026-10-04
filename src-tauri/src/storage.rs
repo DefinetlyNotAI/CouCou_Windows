@@ -1,7 +1,7 @@
 use std::{path::Path,sync::Mutex};
 use windows::{core::PCWSTR,Win32::{Foundation::{LocalFree,HLOCAL},Security::Cryptography::{CryptProtectData,CryptUnprotectData,CRYPT_INTEGER_BLOB}}};
 static WRITE:Mutex<()>=Mutex::new(());
-const MAGIC:&[u8]=b"COUCOU-DPAPI-1\0";
+pub(crate) const MAGIC:&[u8]=b"COUCOU-DPAPI-1\0";
 fn crypt(bytes:&[u8],encrypt:bool)->std::io::Result<Vec<u8>> {
     let input=CRYPT_INTEGER_BLOB{cbData:bytes.len().try_into().map_err(|_|std::io::Error::other("Storage too large"))?,pbData:bytes.as_ptr() as *mut u8};let mut output=CRYPT_INTEGER_BLOB::default();
     unsafe {

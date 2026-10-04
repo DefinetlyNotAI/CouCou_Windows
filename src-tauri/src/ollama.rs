@@ -648,13 +648,10 @@ fn attach_file(message: &mut Value, name: &str, path: &str) -> Result<(), String
         message["content"] = json!(format!("File: {name}\n\n{query}"));
         return Ok(());
     }
-    if ext == "pdf" {
-        return Err("PDFs need text extraction before local chat. Drop a text file instead.".into());
-    }
-    let text = crate::storage::read(std::path::Path::new(path)).and_then(|bytes|String::from_utf8(bytes).map_err(std::io::Error::other)).map_err(|_| {
-        "Local chat supports UTF-8 text files and images with a vision model.".to_string()
-    })?;
-    message["content"] = json!(format!("File: {name}\nFile contents:\n{text}\n\n{query}"));
+    let page=crate::index::document_page(std::path::Path::new(path),0,16000)?;
+    let text=page["content"].as_str().unwrap_or_default();
+    let note=if page["nextOffset"].is_null(){String::new()}else{format!("\nThis is a partial excerpt of {} characters. The complete file remains attached. Use document.read with path {path:?} and offset {} to retrieve more, or project.search for indexed project content. Do not claim to have read the whole file.",page["totalCharacters"],page["nextOffset"])};
+    message["content"] = json!(format!("File: {name}\nPath: {path}\nFile contents:\n{text}{note}\n\n{query}"));
     Ok(())
 }
 
@@ -706,9 +703,16 @@ mod tests {
         std::fs::write(&path, &text).unwrap();
         let mut message = serde_json::json!({"role": "user", "content": "Read this"});
         let result = super::attach_file(&mut message, "large.txt", path.to_str().unwrap());
-        std::fs::remove_file(&path).unwrap();
         result.unwrap();
-        assert!(message["content"].as_str().unwrap().contains(&text));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(),text);
+        let content=message["content"].as_str().unwrap();
+        assert!(content.len()<18000);
+        assert!(content.contains("document.read"));
+        assert!(content.contains("210000"));
+        let tail=crate::index::document_page(&path,200000,16000).unwrap();
+        assert_eq!(tail["content"].as_str().unwrap().len(),10000);
+        assert!(tail["nextOffset"].is_null());
+        std::fs::remove_file(&path).unwrap();
     }
 
     #[test]

@@ -15,7 +15,7 @@ pub struct ToolRequest {
 
 pub fn category(name: &str) -> Option<&'static str> {
     Some(match name {
-        "filesystem.read" | "filesystem.list" | "git.status" | "git.diff" | "git.log" | "git.conflicts" | "repository.search" => "read",
+        "document.read" | "filesystem.read" | "filesystem.list" | "git.status" | "git.diff" | "git.log" | "git.conflicts" | "repository.search" => "read",
         "coding.test" | "coding.lint" | "coding.build" => "run",
         "task.start" | "task.stop" => "run",
         "task.list" => "read",
@@ -41,6 +41,7 @@ pub fn category(name: &str) -> Option<&'static str> {
 pub fn schemas() -> Vec<Value> {
     let definitions = [
         ("filesystem.read", "Read a UTF-8 file", json!({"path":{"type":"string"}}), vec!["path"]),
+        ("document.read", "Read a bounded page of text from a file, PDF or DOCX, including uploaded attachments. Use nextOffset to read another page; use project.search for indexed projects.", json!({"path":{"type":"string"},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":16000}}), vec!["path"]),
         ("filesystem.write", "Write UTF-8 text to a file", json!({"path":{"type":"string"},"content":{"type":"string"}}), vec!["path","content"]),
         ("filesystem.list", "List files in a directory", json!({"path":{"type":"string"}}), vec!["path"]),
         ("terminal.run", "Run an executable with separate arguments", json!({"program":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"cwd":{"type":"string"}}), vec!["program"]),
@@ -150,6 +151,12 @@ pub async fn execute(app: &AppHandle, request: &ToolRequest) -> Result<Value, St
             crate::web::run(&settings,&request.name,input).await
         },
         "filesystem.read" => Ok(json!({"content":tokio::fs::read_to_string(path(input)?).await.map_err(|error| error.to_string())?})),
+        "document.read" => {
+            let path=path(input)?.to_path_buf();
+            let offset=if input.get("offset").is_some(){input["offset"].as_u64().ok_or("Document offset must be nonnegative")?}else{0};
+            let limit=if input.get("limit").is_some(){input["limit"].as_u64().ok_or("Document page length must be positive")?}else{16000};
+            tokio::task::spawn_blocking(move||crate::index::document_page(&path,offset as usize,limit as usize)).await.map_err(|error|error.to_string())?
+        },
         "filesystem.write" => write_file(input).await,
         "filesystem.list" => {
             let mut directory = tokio::fs::read_dir(path(input)?).await.map_err(|error| error.to_string())?;
