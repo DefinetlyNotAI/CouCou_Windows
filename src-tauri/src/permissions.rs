@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::{Mutex, OnceLock}};
+use std::{collections::HashMap, sync::{Mutex, OnceLock, atomic::{AtomicU64, Ordering}}};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::oneshot;
@@ -6,8 +6,12 @@ use crate::{tools::ToolRequest, Shared};
 
 static PENDING: OnceLock<Mutex<HashMap<String, oneshot::Sender<String>>>> = OnceLock::new();
 static GRANTS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+static NEXT_APPROVAL: AtomicU64 = AtomicU64::new(0);
 fn pending() -> &'static Mutex<HashMap<String, oneshot::Sender<String>>> { PENDING.get_or_init(Default::default) }
 fn grants() -> &'static Mutex<HashMap<String, String>> { GRANTS.get_or_init(Default::default) }
+fn approval_id() -> String {
+    format!("{}-{}",std::process::id(),NEXT_APPROVAL.fetch_add(1,Ordering::Relaxed))
+}
 struct PendingGuard(String);
 impl Drop for PendingGuard { fn drop(&mut self) { pending().lock().unwrap().remove(&self.0); } }
 pub fn decide(id: String, decision: String) -> Result<(), String> {
@@ -46,7 +50,7 @@ pub async fn authorize<R: tauri::Runtime>(app: &AppHandle<R>, request: &ToolRequ
     if let Some(permission) = settings.active_agent().and_then(|profile| profile["permissions"].get(&request.name)).and_then(Value::as_str) {
         if permission == "deny" { return Err("Tool denied by agent profile".into()); }
     }
-    let id = format!("{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+    let id = approval_id();
     let (sender,receiver) = oneshot::channel();
     pending().lock().unwrap().insert(id.clone(),sender);
     let _guard = PendingGuard(id.clone());
@@ -79,6 +83,16 @@ mod tests {
     use super::*;
     use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
     use tauri::Listener;
+
+    #[test]
+    fn concurrent_approval_ids_are_unique() {
+        let ids=std::thread::scope(|scope| {
+            let workers:Vec<_>=(0..8).map(|_|scope.spawn(||(0..1000).map(|_|approval_id()).collect::<Vec<_>>())).collect();
+            workers.into_iter().flat_map(|worker|worker.join().unwrap()).collect::<Vec<_>>()
+        });
+        let unique:std::collections::HashSet<_>=ids.iter().collect();
+        assert_eq!(unique.len(),ids.len(),"Concurrent approvals must not overwrite another pending decision");
+    }
 
     #[test]
     fn elevation_in_executable_arguments_cannot_use_a_regular_run_grant() {
