@@ -82,7 +82,6 @@ export class Island {
   // Bot hover → love (IslandWindowController.botHoverIn)
   private botHovering = false;
   private botHoverTimer: number | null = null;
-  private lastLoveTime = -Infinity;
 
   private confusedRecovery: number | null = null;
   private prevViewBeforeConfused: IslandViewName = "overview";
@@ -656,20 +655,19 @@ export class Island {
     if (this.botHoverTimer != null) window.clearTimeout(this.botHoverTimer);
     this.botHoverTimer = window.setTimeout(() => {
       this.botHoverTimer = null;
+      this.updateBotHover();
       if (!this.botHovering || State.stateOverride != null) return;
-      this.lastLoveTime = performance.now() / 1000;
       this.engine.triggerEmote("love",2.4);
       Sound.play("love");
       this.ensureRunning();
       this.scheduleLove();
-    }, this.lastLoveTime===-Infinity ? 3000 : 1600);
+    }, 3000);
   }
 
   private cancelBotHover() {
     this.botHovering=false;
     if (this.botHoverTimer != null) window.clearTimeout(this.botHoverTimer);
     this.botHoverTimer = null;
-    this.lastLoveTime=-Infinity;
     this.engine.tgEs = 1;
   }
 
