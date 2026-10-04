@@ -1,5 +1,5 @@
 import { env, pipeline, Tensor, type AutomaticSpeechRecognitionPipeline } from "@huggingface/transformers";
-import { KokoroTTS } from "kokoro-js";
+import { KokoroTTS, TextSplitterStream } from "kokoro-js";
 
 env.allowLocalModels = false;
 if (env.backends.onnx.wasm) {
@@ -50,7 +50,10 @@ worker.onmessage = async ({ data }) => {
     }
     if (mode === "speak") {
       worker.postMessage({ id, progress: "Synthesizing voice…" });
-      for await (const { audio: output } of model.stream(text, { voice: "af_heart" })) {
+      const sentences = new TextSplitterStream();
+      sentences.push(text);
+      sentences.close();
+      for await (const { audio: output } of model.stream(sentences, { voice: "af_heart" })) {
         worker.postMessage({ id, progress: "Speaking…", audio: output.audio, rate: output.sampling_rate }, [output.audio.buffer]);
       }
     }
