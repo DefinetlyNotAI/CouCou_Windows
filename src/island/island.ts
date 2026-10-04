@@ -657,7 +657,8 @@ export class Island {
       this.botHoverTimer = null;
       this.updateBotHover();
       if (!this.botHovering || State.stateOverride != null) return;
-      this.engine.triggerEmote("love",2.4);
+      this.engine.setPetting(true);
+      this.engine.triggerEmote("love",3.2);
       Sound.play("love");
       this.ensureRunning();
       this.scheduleLove();
@@ -666,6 +667,7 @@ export class Island {
 
   private cancelBotHover() {
     this.botHovering=false;
+    this.engine.setPetting(false);
     if (this.botHoverTimer != null) window.clearTimeout(this.botHoverTimer);
     this.botHoverTimer = null;
     this.engine.tgEs = 1;
@@ -768,7 +770,7 @@ export class Island {
 
   private updateBotTargets() {
     const p = State.fullscreen && State.view === "prompt"
-      ? { ...botPosition(State.mode, State.view, this.height.value, State.uploadProgress), cx: window.innerWidth / 2, cy: 18, diameter: 20 }
+      ? { ...botPosition(State.mode, State.view, this.height.value, State.uploadProgress), cx: window.innerWidth > 900 ? 95 : 75, cy: window.innerHeight - 118, diameter: 62 }
       : botPosition(State.mode, State.view, this.height.value, State.uploadProgress);
     this.botCx.target = p.cx;
     this.botCy.target = p.cy;
@@ -825,8 +827,8 @@ export class Island {
     const focus = State.focusTask;
     this.engine.bodyColor = focus?.isIntegration ? hexToRGB(focus.color) : null;
     this.engine.particleOverhang = BOT_OVERHANG + 2*Math.min(0,canvasTop);
-    this.engine.lookX = this.lookX();
-    this.engine.lookY = State.handoffs.some(item => item.status === "working") ? 0.65 : this.lookY();
+    this.engine.lookX = State.handoffs.some(item => item.status === "working") ? Math.sin(performance.now() / 1300) * 0.35 : this.lookX();
+    this.engine.lookY = State.handoffs.some(item => item.status === "working") ? -0.65 : this.lookY();
     if (this.engine.morph > 0.3) {
       this.engine.slotHTarget = State.fileDragOver ? 0.2 : 0;
     } else {
@@ -885,8 +887,8 @@ export class Island {
       this.handoffScene.replaceChildren(...handoffs.map((item, index) => {
         const message = item.status === "working" ? `Talking to ${item.name}` : item.status === "returning" ? `${item.name} delivered a result` : item.status === "error" ? `${item.name} failed` : `${item.name} stopped`;
         return h("div", { class: `handoff-helper ${item.status}`, "aria-label": message, title: message, "data-kind": item.kind },
-          h("span", { class: "handoff-packet", "aria-hidden": "true" }),
-          createMiniBot(this.handoffTasks[index], State.mode === "compact" ? 16 : 22, { x: 0, y: -0.8 }),
+          h("span", { class: "handoff-packet", "aria-hidden": "true", style: `--helper-color:${item.color}` }),
+          createMiniBot(this.handoffTasks[index], State.mode === "compact" ? 16 : 22, { x: 0, y: 0.8 }),
           h("span", { class: "handoff-label", text: item.name }),
           h("span", { class: "handoff-speech", "aria-hidden": "true" }, h("i", {}), h("i", {}), h("i", {})));
       }));

@@ -8,6 +8,26 @@ const { outputText } = ts.transpileModule(source, { compilerOptions: { target: t
 const { IslandStateMachine } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`);
 const layout = ts.transpileModule(readFileSync(new URL("../src/core/layout.ts", import.meta.url), "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
 const { containsIslandPoint } = await import(`data:text/javascript;base64,${Buffer.from(layout).toString("base64")}`);
+const animation = ts.transpileModule(readFileSync(new URL("../src/core/anim.ts", import.meta.url), "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+const sound = ts.transpileModule(readFileSync(new URL("../src/core/sound.ts", import.meta.url), "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+const engineSource = readFileSync(new URL("../src/mochi/engine.ts", import.meta.url), "utf8")
+  .replace('from "../core/anim"', `from "data:text/javascript;base64,${Buffer.from(animation).toString("base64")}"`)
+  .replace('from "../core/sound"', `from "data:text/javascript;base64,${Buffer.from(sound).toString("base64")}"`);
+const engineModule = ts.transpileModule(engineSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+const { BotEngine } = await import(`data:text/javascript;base64,${Buffer.from(engineModule).toString("base64")}`);
+test("headpat face survives emote expiry and releases when petting ends", () => {
+  const bot = new BotEngine();
+  bot.triggerEmote("love", 2);
+  const happyEyes = bot.eyeOverride;
+  bot.setPetting(true);
+  bot.eyeOverrideUntil = -1;
+  bot.update(1 / 60);
+  assert.equal(bot.eyeOverride, happyEyes);
+  assert.ok(bot.blush >= 0.7);
+  bot.setPetting(false);
+  bot.update(1 / 60);
+  assert.equal(bot.eyeOverride, bot.permanentEye);
+});
 test("drops must touch the visible island, including its rounded edge", () => {
   const rect={x:100,y:0,w:200,h:80};
   assert.equal(containsIslandPoint(rect,{x:99,y:40},20),false);

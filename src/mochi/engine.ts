@@ -186,6 +186,7 @@ export class BotEngine {
 
   eyeOverride: EyeShape | null = null;
   eyeOverrideUntil = 0;
+  petting = false;
   permanentEye: EyeShape | null = null;
   permanentEmote: BotEmoteName | null = null;
   miniNextBehavior = 0;
@@ -419,6 +420,14 @@ export class BotEngine {
     }
   }
 
+  setPetting(active: boolean) {
+    if (this.petting && !active && this.eyeOverride === EMOTE_EYE.love) {
+      this.eyeOverride = this.permanentEye;
+      this.eyeOverrideUntil = this.permanentEye ? Number.POSITIVE_INFINITY : 0;
+    }
+    this.petting = active;
+  }
+
   emit(type: Particle["type"], count: number) {
     for (let i = 0; i < count; i++) {
       const isZ = type === "z";
@@ -571,7 +580,10 @@ export class BotEngine {
       this.nextBlink = n + 2.2 + Math.random() * 3.2;
     }
 
-    if (this.eyeOverride && n > this.eyeOverrideUntil) {
+    if (this.petting) {
+      this.eyeOverride = EMOTE_EYE.love;
+      this.blush = Math.max(this.blush, 0.7);
+    } else if (this.eyeOverride && n > this.eyeOverrideUntil) {
       this.eyeOverride = this.permanentEye;
       if (this.permanentEye) this.eyeOverrideUntil = Number.POSITIVE_INFINITY;
     }
