@@ -187,6 +187,7 @@ export class BotEngine {
   eyeOverride: EyeShape | null = null;
   eyeOverrideUntil = 0;
   petting = false;
+  private pettingLoved = false;
   permanentEye: EyeShape | null = null;
   permanentEmote: BotEmoteName | null = null;
   miniNextBehavior = 0;
@@ -270,6 +271,7 @@ export class BotEngine {
   }
 
   blink() {
+    if (this.petting) return;
     if (this.locks.has("open")) return;
     this.anim("open", [[0.06, 70, Ease.inOut], [1, 130, Ease.out]]);
   }
@@ -420,12 +422,19 @@ export class BotEngine {
     }
   }
 
-  setPetting(active: boolean) {
-    if (this.petting && !active && this.eyeOverride === EMOTE_EYE.love) {
+  setPetting(active: boolean, loved = false) {
+    if (this.petting && !active) {
       this.eyeOverride = this.permanentEye;
       this.eyeOverrideUntil = this.permanentEye ? Number.POSITIVE_INFINITY : 0;
+      this.anim("blush", [[0, 300, Ease.inOut]]);
     }
     this.petting = active;
+    this.pettingLoved = active && loved;
+    if (active) {
+      this.tweens.delete("open");
+      this.locks.delete("open");
+      this.open = 1;
+    }
   }
 
   emit(type: Particle["type"], count: number) {
@@ -459,7 +468,7 @@ export class BotEngine {
   /** True while anything is still moving — lets the island stop its RAF loop. */
   get busy(): boolean {
     return (
-      this.tweens.size > 0 ||
+      this.petting || this.tweens.size > 0 ||
       this.particles.length > 0 ||
       this.cfg.bounces || this.cfg.scans || this.cfg.breathes || this.cfg.zz || this.cfg.sweat ||
       this.isMini ||
@@ -581,7 +590,7 @@ export class BotEngine {
     }
 
     if (this.petting) {
-      this.eyeOverride = EMOTE_EYE.love;
+      this.eyeOverride = this.pettingLoved ? EMOTE_EYE.love : EMOTE_EYE.happy;
       this.blush = Math.max(this.blush, 0.7);
     } else if (this.eyeOverride && n > this.eyeOverrideUntil) {
       this.eyeOverride = this.permanentEye;

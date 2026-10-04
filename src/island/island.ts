@@ -640,12 +640,14 @@ export class Island {
     const rect = this.islandRect();
     const cx = rect.x + this.botCx.value;
     const cy = rect.y + this.botCy.value;
-    const radius = this.botSize.value * 0.34;
+    // A slightly larger exit area prevents breathing and cursor jitter from
+    // restarting the three-second dwell at the edge of the mascot.
+    const radius = this.botSize.value * (this.botHovering ? 0.45 : 0.36);
     return (x - cx) ** 2 + (y - cy) ** 2 <= radius * radius;
   }
 
   private botHoverIn() {
-    this.engine.blink();
+    this.engine.setPetting(true);
     this.engine.tgEs = 1.08;
     Sound.play("hover");
     this.scheduleLove();
@@ -657,7 +659,7 @@ export class Island {
       this.botHoverTimer = null;
       this.updateBotHover();
       if (!this.botHovering || State.stateOverride != null) return;
-      this.engine.setPetting(true);
+      this.engine.setPetting(true, true);
       this.engine.triggerEmote("love",3.2);
       Sound.play("love");
       this.ensureRunning();
