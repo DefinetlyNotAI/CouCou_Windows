@@ -34,11 +34,25 @@ pub fn normalize(request:&ToolRequest)->Result<Option<ToolRequest>,String> {
             "vercel.domains"=>format!("/v9/projects/{}/domains",segment(value(input,"project")?)?),
             "vercel.env"=>format!("/v9/projects/{}/env",segment(value(input,"project")?)?),
             "vercel.status"|"vercel.preview"=>format!("/v13/deployments/{}",segment(value(input,"deployment")?)?),
-            "vercel.rollback"=> {method="POST";format!("/v9/projects/{}/rollback/{}",segment(value(input,"project")?)?,segment(value(input,"deployment")?)?)},
+            "vercel.rollback"=> {method="POST";body=Some(json!({}));format!("/v9/projects/{}/rollback/{}",segment(value(input,"project")?)?,segment(value(input,"deployment")?)?)},
             _=>return Err("Unknown Vercel action".into()),
         }
     };
     if !github {if let Some(team)=input["team"].as_str().filter(|team|!team.is_empty()) {path.push(if path.contains('?'){'&'}else{'?'});path.push_str("teamId=");path.push_str(&segment(team)?);}}
     let mut mapped=request.clone();mapped.name=if github{"github.request"}else{"vercel.request"}.into();mapped.input=json!({"path":path,"method":method});
     if let Some(body)=body {mapped.input["body"]=body;}Ok(Some(mapped))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn rollback_includes_required_json_body_and_team_scope() {
+        let request=ToolRequest {name:"vercel.rollback".into(),input:json!({"project":"prj_example","deployment":"dpl_example","team":"team_example"}),chat_id:"rollback-test".into(),project_id:String::new()};
+        let mapped=normalize(&request).unwrap().unwrap();
+        assert_eq!(mapped.name,"vercel.request");
+        assert_eq!(mapped.input["method"],"POST");
+        assert_eq!(mapped.input["path"],"/v9/projects/prj_example/rollback/dpl_example?teamId=team_example");
+        assert_eq!(mapped.input["body"],json!({}));
+    }
 }
