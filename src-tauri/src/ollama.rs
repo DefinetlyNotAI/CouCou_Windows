@@ -193,7 +193,7 @@ fn context_window(messages: &[Value], tools: &[Value], minimum: u64, limit: u64)
     }).sum::<usize>() + tools.iter().map(|tool| tool.to_string().len()).sum::<usize>();
     let needed = (bytes as u64).div_ceil(2) + 2048;
     if needed > limit { return Err(format!("This conversation needs about {needed} context tokens; the model supports {limit}. Start a new chat or use a model with a larger context.")); }
-    Ok(needed.max(minimum.min(limit)).next_power_of_two().min(limit))
+    Ok(needed.max(minimum.min(limit)).div_ceil(4096).saturating_mul(4096).min(limit))
 }
 
 pub async fn send<F: Fn(ChatProgress) + Send + Sync>(
@@ -676,7 +676,9 @@ mod tests {
     fn context_grows_for_tool_catalog_and_respects_model_limit() {
         let messages=vec![serde_json::json!({"role":"user","content":"hi"})];
         let tools=vec![serde_json::json!({"description":"x".repeat(18000)})];
-        assert!(super::context_window(&messages,&tools,4096,32768).unwrap()>4096);
+        let context = super::context_window(&messages,&tools,4096,32768).unwrap();
+        assert!(context > 4096);
+        assert!(context < 16384, "Context allocation must not double the KV cache for a small increase");
         let larger=vec![serde_json::json!({"role":"tool","content":"x".repeat(40000)})];
         assert!(super::context_window(&larger,&tools,4096,65536).unwrap()>super::context_window(&messages,&tools,4096,65536).unwrap());
         assert!(super::context_window(&larger,&tools,4096,4096).is_err());

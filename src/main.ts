@@ -13,11 +13,10 @@ async function main() {
 
   void Sound.preload();
 
-  await State.loadChats();
+  const [boot] = await Promise.all([Bridge.boot(), State.loadChats()]);
 
   const island = new Island(root);
 
-  const boot = await Bridge.boot();
   if (boot) {
     State.settings = { ...State.settings, ...boot.settings };
   }
