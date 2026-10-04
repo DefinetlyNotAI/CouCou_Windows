@@ -1,5 +1,7 @@
 // Minimal DOM helpers — no framework, as specified.
 
+import { OUTLINE_ICONS } from "./icons";
+
 type Attrs = Record<string, string | number | boolean | EventListener | undefined>;
 type Child = Node | string | null | undefined | false;
 
@@ -34,10 +36,10 @@ export function svg(path: string, size = 14, opts: { fill?: string; stroke?: num
   el.setAttribute("aria-hidden", "true");
   const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
   p.setAttribute("d", path);
-  if (opts.stroke) {
+  if (opts.stroke || OUTLINE_ICONS.has(path)) {
     p.setAttribute("fill", "none");
-    p.setAttribute("stroke", "currentColor");
-    p.setAttribute("stroke-width", String(opts.stroke));
+    p.setAttribute("stroke", opts.fill ?? "currentColor");
+    p.setAttribute("stroke-width", String(opts.stroke ?? 1.8));
     p.setAttribute("stroke-linecap", "round");
     p.setAttribute("stroke-linejoin", "round");
   } else {

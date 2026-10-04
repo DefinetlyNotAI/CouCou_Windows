@@ -1,4 +1,5 @@
 import { h, svg } from "./dom";
+import { ICONS } from "./icons";
 import { Bridge,IS_TAURI } from "../core/bridge";
 import { State } from "../core/state";
 import { buildRuns } from "./runs";
@@ -147,8 +148,8 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
   root.classList.add("inspector-hidden", "console-hidden");
   const panelControls = h("div", { class: "workspace-panel-controls" });
   for (const [panel, label, icon] of [
-    ["inspector", "Toggle inspector", "M3 4h18v16H3V4zm2 2v12h9V6H5zm11 0v12h3V6h-3z"],
-    ["console", "Toggle terminal and editor", "M3 4h18v16H3V4zm2 2v12h14V6H5zm2 2 4 4-4 4-1.4-1.4 2.6-2.6-2.6-2.6L7 8zm5 6h5v2h-5v-2z"],
+    ["inspector", "Toggle inspector", ICONS.inspector],
+    ["console", "Toggle terminal and editor", ICONS.terminal],
   ]) {
     const button = h("button", { class: "chat-reset", title: label, "aria-label": label, "aria-pressed": "false", onclick: () => {
       const hidden = root.classList.toggle(`${panel}-hidden`);

@@ -1,5 +1,7 @@
 
 
+@import "./controls.css";
+
 :root {
   color-scheme: dark;
 
@@ -1638,7 +1640,7 @@ input[type="range"]::-webkit-slider-thumb {
 .full-workspace .bubble { padding: 10px 15px; font: 14px/1.5 var(--font); background: #2c2d30; border-radius: 16px; }
 .full-workspace .chat-bar { width: 100%; max-width: 800px; align-self: center; padding: 10px 12px; background: #26272b; border: 1px solid #38393e; border-radius: 16px; gap: 6px; }
 .full-workspace .chat-input { font-size: 14px; line-height: 22px; }
-.full-workspace .chat-reset { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 6px; }
+.full-workspace .chat-reset { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 7px; }
 .full-workspace .chat-reset:hover { background: #33353a; }
 .full-workspace .chat-toolbar { min-height: 32px; gap: 8px; margin-bottom: 4px; }
 .full-workspace .chat-picker { background: transparent; border-color: transparent; }

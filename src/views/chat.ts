@@ -105,6 +105,10 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   const chipRow = h("div", { class: "chip-row" });
   const log = h("div", { class: "chat-log", "aria-live": "polite" });
   const status = h("div", { class: "chat-status", role: "status" });
+  let progressOpen = false;
+  let progressRunId = "";
+  let planShown = false;
+  let liveProgress: HTMLElement | null = null;
   const permissionPanel = h("div", { class: "tool-permissions" });
   const contextInspector=buildContext(()=>void updateContext(),()=>void summarizeContext(),()=>void clearContext(),()=>resetting);
   void onEvent<{ id: string; category: string; request: { name: string; input: unknown; chatId: string; projectId: string } }>("tool-permission", event => {
@@ -135,7 +139,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   const profilePicker = h("select", { class: "chat-picker", "aria-label": "Agent profile" }) as HTMLSelectElement;
   for (const profile of profiles(State.settings)) profilePicker.append(h("option", { value: profile.id, text: profile.name }));
   const recentPicker = h("select", { class: "chat-picker", "aria-label": "Recent chats" }) as HTMLSelectElement;
-  const pickerRefresh = h("button", { class: "chat-reset", title: "Refresh models", "aria-label": "Refresh models" }, svg("M17.65 6.35A7.95 7.95 0 0012 4a8 8 0 108 8h-2a6 6 0 11-1.76-4.24L13 11h7V4l-2.35 2.35z", 13)) as HTMLButtonElement;
+  const pickerRefresh = h("button", { class: "chat-reset", title: "Refresh models", "aria-label": "Refresh models" }, svg(ICONS.refresh, 16)) as HTMLButtonElement;
   const toolbar = h("div", { class: "chat-toolbar" }, modelPicker, pickerRefresh, profilePicker, recentPicker);
   const quickMenu = h("div", { class: "chat-quick-menu" });
   const tasks = h("div", { class: "chat-task-list" });
@@ -155,7 +159,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     State.notify(); onHeightChange();
   });
   const input = h("textarea", { rows: "1", class: "chat-input", placeholder: "Ask me anything…", spellcheck: "false", "aria-label": "Message" }) as HTMLTextAreaElement;
-  const send = h("button", { class: "send-btn", title: "Send", "aria-label": "Send" }, svg(ICONS.arrowUp, 11)) as HTMLButtonElement;
+  const send = h("button", { class: "send-btn", title: "Send", "aria-label": "Send" }, svg(ICONS.arrowUp, 14)) as HTMLButtonElement;
   const reset = h("button", { class: "chat-reset", title: "New chat", "aria-label": "New chat" }, svg(ICONS.plus, 13)) as HTMLButtonElement;
   const upload = h("button", { class: "chat-reset", title: "Attach file", "aria-label": "Attach file", onclick: async () => {
     try {
@@ -164,11 +168,11 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     } catch (error) { State.chatStatus = String(error).replace(/^Error:\s*/, ""); State.notify(); }
   } }, svg(ICONS.doc, 13));
   const microphone = h("button", { class: "chat-reset", title: "Microphone", "aria-label": "Microphone" },
-    svg("M12 14a3 3 0 003-3V5a3 3 0 00-6 0v6a3 3 0 003 3zm5-3h2a7 7 0 01-6 6.93V21h-2v-3.07A7 7 0 015 11h2a5 5 0 0010 0z", 14)) as HTMLButtonElement;
+    svg(ICONS.microphone, 16)) as HTMLButtonElement;
   const call = h("button", { class: "chat-reset", title: "Start voice call", "aria-label": "Start voice call" },
-    svg("M6.6 10.8a15 15 0 006.6 6.6l2.2-2.2a1 1 0 011-.24c1.1.37 2.3.56 3.6.56a1 1 0 011 1V20a1 1 0 01-1 1C10.1 21 3 13.9 3 5a1 1 0 011-1h3.5a1 1 0 011 1c0 1.2.2 2.5.56 3.6a1 1 0 01-.24 1l-2.22 2.2z", 14)) as HTMLButtonElement;
+    svg(ICONS.phone, 16)) as HTMLButtonElement;
   const readAloud = h("button", { class: "chat-reset", title: "Read reply aloud", "aria-label": "Read reply aloud" }, svg(ICONS.speakerOn, 14)) as HTMLButtonElement;
-  const queueButton = h("button", { class: "chat-reset", title: "Queue message", "aria-label": "Queue message" }, svg("M4 4h12v2H4V4zm0 5h12v2H4V9zm0 5h7v2H4v-2zm14-1v3h3v2h-3v3h-2v-3h-3v-2h3v-3h2z", 14)) as HTMLButtonElement;
+  const queueButton = h("button", { class: "chat-reset", title: "Queue message", "aria-label": "Queue message" }, svg(ICONS.queue, 16)) as HTMLButtonElement;
   const bar = h("div", { class: "chat-bar" }, reset, upload, microphone, call, readAloud, input, queueButton, send);
   const el = h("div", { class: "view" }, h("div", { class: "card wash chat-card" }, h("div", { class: "chat-body" }, toolbar, quickActions, chipRow, log, contextInspector.el, permissionPanel, activity, queued, status, bar)));
   (el.querySelector(".card") as HTMLElement).style.setProperty("--wash", "rgba(99,102,241,0.5)");
@@ -362,7 +366,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     }
     catch (error) { State.chatStatus = String(error); }
     finally { downloadingVoice = false; State.voiceBusy = false; State.notify(); }
-  } }, svg("M11 3h2v9l3-3 1.4 1.4L12 16l-5.4-5.6L8 9l3 3V3zM4 17h2v3h12v-3h2v5H4v-5z", 14));
+  } }, svg(ICONS.download, 16));
   toolbar.append(downloadVoice);
 
   function stopVoice() {
@@ -862,11 +866,15 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
             State.droppedFile = null; State.promptContext = null; State.notify(); onHeightChange();
           } }, svg(ICONS.xmark, 10))));
       }
-      const key = JSON.stringify(State.chatHistory) + State.chatBusy + State.voiceBusy + resetting;
+      const currentRun = State.runs.find(run => run.id === State.chatRequestId) || State.runs.at(-1);
+      if (currentRun?.id !== progressRunId) { progressRunId = currentRun?.id || ""; progressOpen = false; planShown = false; }
+      if (currentRun?.plan.length && !planShown) { progressOpen = true; planShown = true; }
+      const key = JSON.stringify([State.chatHistory, State.chatBusy, State.voiceBusy, resetting, State.chatStatus, currentRun?.plan, currentRun?.calls, State.fullscreen]);
       if (key !== renderedKey) {
         const follow = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
         const previousTop = log.scrollTop;
         renderedKey = key;
+        liveProgress = null;
         clear(log);
         if (!State.chatHistory.length && !State.chatBusy) log.append(h("div", { class: "chat-empty" }, h("span", { text: "What can I help with?" })));
         for (const message of State.chatHistory) if (message.content) {
@@ -880,11 +888,20 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
           if (message.status === "stopped") actions.append(h("span", { text: "Stopped" }));
           row.append(actions); log.append(row);
         }
+        if (State.fullscreen && currentRun && (State.chatBusy || currentRun.plan.length || currentRun.calls.length)) {
+          const progress = h("details", { class: "chat-progress", open: progressOpen });
+          progress.addEventListener("toggle", () => { if (progress.isConnected) progressOpen = progress.open; });
+          liveProgress = h("summary", { text: State.chatBusy ? State.chatStatus || "Working…" : `Activity · ${currentRun.status}` });
+          progress.append(liveProgress);
+          if (currentRun.plan.length) progress.append(h("ol", {}, ...currentRun.plan.map(step => h("li", { text: step }))));
+          if (currentRun.calls.length) progress.append(h("div", { class: "chat-progress-tools" }, ...currentRun.calls.slice(-5).map(call => h("div", { text: `${call.name} · ${call.error ? "Failed" : call.result ? "Complete" : "Running"}` }))));
+          log.append(progress);
+        }
         log.scrollTop = follow ? log.scrollHeight : previousTop;
       }
       status.textContent = State.chatStatus;
       clear(send);
-      send.append(svg(State.chatBusy ? ICONS.xmark : ICONS.arrowUp, 11));
+      send.append(svg(State.chatBusy ? ICONS.xmark : ICONS.arrowUp, 14));
       send.title = State.chatBusy ? "Stop reply" : "Send";
       send.setAttribute("aria-label", send.title);
       input.disabled = resetting;
@@ -914,6 +931,12 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
       input.placeholder = State.chatBusy ? "Queue another message…" : State.chatHistory.length ? "Continue…" : "Ask me anything…";
       input.style.height = "18px";
       input.style.height = `${Math.min(64, Math.max(18, input.scrollHeight))}px`;
+    },
+    tick() {
+      const run = State.runs.find(run => run.id === State.chatRequestId);
+      if (!State.chatBusy || !run || !liveProgress) return;
+      const label = `${State.chatStatus || "Working…"} · ${Math.max(0, Math.floor((Date.now() - run.startedAt) / 1000))}s`;
+      if (liveProgress.textContent !== label) liveProgress.textContent = label;
     },
     focus() { if (!State.chatBusy) { input.focus(); input.select(); } },
   };

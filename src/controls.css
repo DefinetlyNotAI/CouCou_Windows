@@ -1,0 +1,112 @@
+/* Shared control treatment for the island, workspace and settings window. */
+:root {
+  --control-bg: #252629;
+  --control-border: #3b3d42;
+  --control-hover: #484b52;
+  --control-focus: #b3bbc8;
+}
+
+:root select:not([multiple]),
+:root input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]):not(.chat-input),
+:root textarea:not(.chat-input):not(.workspace-editor) {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  background-color: var(--control-bg);
+  color: var(--ink);
+  font: 400 12.5px/1.45 var(--font);
+  transition: border-color .14s, background-color .14s;
+}
+
+:root select:not([multiple]) {
+  appearance: none;
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23aeb2bb' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+:root select:not([multiple]):hover:not(:disabled),
+:root input:hover:not(:disabled):not(.chat-input),
+:root textarea:hover:not(:disabled):not(.chat-input) { border-color: var(--control-hover); }
+:root input::placeholder,:root textarea::placeholder { color: #8d919b; opacity: 1; }
+:root :is(input,select,textarea):disabled { opacity: .45; cursor: not-allowed; }
+:root :is(input,textarea)[readonly] { color: var(--dim); }
+:root :is(input,select,textarea)[aria-invalid="true"] { border-color: var(--red); }
+
+:root :is(button,input,select,textarea,summary,a):focus-visible {
+  outline: 2px solid var(--control-focus);
+  outline-offset: 2px;
+}
+:root :is(input,select,textarea):focus-visible { border-color: var(--control-focus); }
+:root select option { background: #252629; color: var(--ink); padding: 8px 10px; }
+svg { flex-shrink: 0; vertical-align: middle; }
+
+:root .chat-reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  color: #b1b5bd;
+  transition: color .14s, background-color .14s;
+}
+:root .chat-reset:hover:not(:disabled) { background: #34363b; color: var(--ink); }
+:root .chat-reset:disabled { opacity: .4; cursor: default; }
+.chat-reset > svg { width: 16px; height: 16px; }
+.full-workspace .chat-reset { width: 32px; height: 32px; }
+:root .workspace-controls button,:root .workspace-editor-header button {
+  min-height: 32px;
+  border-color: var(--control-border);
+  border-radius: 7px;
+  background: var(--control-bg);
+}
+:root .workspace-controls button:hover:not(:disabled),
+:root .workspace-editor-header button:hover:not(:disabled) { background: #34363b; border-color: var(--control-hover); }
+:root .workspace-tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+:root .workspace-tabs button:hover { color: var(--ink); }
+:root .settings-nav button[aria-current="page"] { background: #292b30; color: var(--ink); }
+:root .settings-nav button { border-radius: 8px; }
+:root .settings-window button:not(.switch) { min-height: 34px; border-radius: 8px; }
+:root .settings-window .switch { border: 0; }
+:root .settings-window .switch:hover { background: #555961; }
+:root .settings-window .switch.on:hover { background: #2dcd70; }
+.preference-group > summary { list-style: none; display: flex; align-items: center; justify-content: space-between; }
+.preference-group > summary::after { content: ""; width: 7px; height: 7px; border-right: 1.5px solid var(--dim); border-bottom: 1.5px solid var(--dim); transform: rotate(45deg); margin-right: 4px; }
+.preference-group[open] > summary::after { transform: rotate(225deg); }
+
+/* Newer WebView2 versions support styling the native popup without replacing
+   the select's keyboard navigation or change events. Older versions retain it. */
+@supports (appearance: base-select) {
+  :root select:not([multiple]):not([size]),
+  :root select:not([multiple]):not([size])::picker(select) { appearance: base-select; }
+  :root select:not([multiple]):not([size]) { background-image: none; padding-right: 10px; }
+  :root select::picker-icon { color: var(--dim); margin-left: 10px; }
+  :root select::picker(select) {
+    border: 1px solid var(--control-border);
+    border-radius: 10px;
+    padding: 5px;
+    background: #252629;
+    color: var(--ink);
+    font: 12.5px/1.45 var(--font);
+    box-shadow: 0 8px 24px #0005;
+    max-height: min(320px, 60vh);
+    overflow: auto;
+  }
+  :root select option { border-radius: 5px; min-height: 32px; padding: 7px 10px; }
+  :root select option:hover,:root select option:focus { background: #36383e; }
+  :root select option:checked { background: #3c3f46; }
+}
+
+#root:not(.fullscreen) select.chat-picker { min-height: 26px; padding-block: 3px; font-size: 11px; }
+
+.chat-progress { color: var(--dim); font: 12px/1.6 var(--font); margin: 8px 0 18px; }
+.chat-progress > summary { cursor: pointer; overflow-wrap: anywhere; }
+.chat-progress[open] > summary { color: var(--ink); margin-bottom: 8px; }
+.chat-progress ol { padding-left: 20px; color: #c4c7cd; }
+.chat-progress li + li { margin-top: 4px; }
+.chat-progress-tools { margin-top: 8px; font-size: 11px; }

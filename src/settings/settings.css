@@ -1,5 +1,7 @@
 /* Settings window — same palette as the island, laid out as a normal window. */
 
+@import "../controls.css";
+
 :root {
   /* Makes Windows render the native dropdown and scrollbars dark — without it
      the <select> popup is white text on white. */
