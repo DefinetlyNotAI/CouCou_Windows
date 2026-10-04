@@ -9,6 +9,8 @@ class LocalVoice {
   private recordingCancel?: () => void;
   private playback: AudioBufferSourceNode[] = [];
   private playbackEnd = 0;
+  private bufferedAudio: { samples: Float32Array; rate: number }[] = [];
+  private playbackStarted = false;
   private epoch = 0;
   private listeningEpoch = 0;
 
@@ -19,7 +21,11 @@ class LocalVoice {
         const task = this.pending.get(data.id);
         if (!task) return;
         if (data.progress) task.progress(data.progress);
-        if (data.audio && data.rate) this.play(data.audio, data.rate);
+        if (data.audio && data.rate) {
+          this.bufferedAudio.push({ samples: data.audio, rate: data.rate });
+          if (this.playbackStarted || this.bufferedAudio.length >= 2) this.flushAudio();
+        }
+        if (data.done) this.flushAudio();
         if (data.error || data.done || data.text !== undefined) {
           this.pending.delete(data.id);
           if (data.error) task.reject(new Error(data.error));
@@ -63,10 +69,18 @@ class LocalVoice {
     source.start(start);
   }
 
+  private flushAudio() {
+    if (!this.bufferedAudio.length) return;
+    this.playbackStarted = true;
+    for (const { samples, rate } of this.bufferedAudio.splice(0)) this.play(samples, rate);
+  }
+
   async speak(text: string, progress: (text: string) => void) {
     const epoch = this.epoch;
     await this.audioContext();
     if (epoch !== this.epoch) throw new Error("Voice stopped");
+    this.bufferedAudio = [];
+    this.playbackStarted = false;
     await this.request("speak", progress, { text });
     const deadline = performance.now() + Math.max(0, this.playbackEnd - this.context!.currentTime) * 1000 + 10000;
     try {
@@ -145,6 +159,8 @@ class LocalVoice {
   private stopSpeaking() {
     for (const source of this.playback) { try { source.stop(); } catch { /* Already ended. */ } }
     this.playback = [];
+    this.bufferedAudio = [];
+    this.playbackStarted = false;
     this.playbackEnd = 0;
     if (this.pending.size) {
       this.worker?.terminate(); this.worker = undefined;

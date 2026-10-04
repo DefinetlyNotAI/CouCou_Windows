@@ -51,11 +51,25 @@ worker.onmessage = async ({ data }) => {
     if (mode === "speak") {
       worker.postMessage({ id, progress: "Synthesizing voice…" });
       const sentences = new TextSplitterStream();
-      sentences.push(text);
+      sentences.push(String(text).replace(/([^\s.!?…:;,])[^\S\n]*\n+/g, "$1. ").replace(/\s+/g, " ").trim());
       sentences.close();
-      for await (const { audio: output } of model.stream(sentences, { voice: "af_heart" })) {
+      // Generate phrases together so each short sentence does not create a
+      // separate inference gap. Stay below Kokoro's phoneme token limit.
+      let phrase = "";
+      const sendPhrase = async () => {
+        if (!phrase) return;
+        const output = await model.generate(phrase, { voice: "af_heart" });
         worker.postMessage({ id, progress: "Speaking…", audio: output.audio, rate: output.sampling_rate }, [output.audio.buffer]);
+        phrase = "";
+      };
+      for await (const sentence of sentences) {
+        if (phrase && phrase.length + sentence.length + 1 > 350) await sendPhrase();
+        for (const word of sentence.split(/\s+/)) {
+          if (phrase.length + word.length + 1 > 350) await sendPhrase();
+          phrase += `${phrase ? " " : ""}${word}`;
+        }
       }
+      await sendPhrase();
     }
     worker.postMessage({ id, done: true });
   } catch (error) {

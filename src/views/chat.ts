@@ -421,7 +421,12 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   });
   function spokenReply(): string {
     const reply = State.chatHistory.at(-1);
-    return reply?.role === "assistant" ? bubble(reply).textContent || "" : "";
+    if (reply?.role !== "assistant") return "";
+    const content = bubble(reply).querySelector(".markdown");
+    if (!content) return "";
+    const spoken = content.cloneNode(true) as HTMLElement;
+    spoken.querySelectorAll("p,li,h1,h2,h3,h4,h5,h6,br,pre,tr").forEach(node => node.after(document.createTextNode("\n")));
+    return spoken.textContent?.trim() || "";
   }
   microphone.addEventListener("click", async () => {
     if (voiceMode || callActive) { stopVoice(); return; }
