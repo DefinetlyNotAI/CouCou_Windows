@@ -1,4 +1,4 @@
-import { h } from "./dom";
+import { h, svg } from "./dom";
 import { Bridge,IS_TAURI } from "../core/bridge";
 import { State } from "../core/state";
 import { buildRuns } from "./runs";
@@ -144,6 +144,20 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
     ["Services",buildServices(tool)],["Tasks",buildBackground()],["Stats",buildStats()],["Chats",buildLibrary()],
   ],"Inspector"));
   root.prepend(left);root.append(right,footer);
+  root.classList.add("inspector-hidden", "console-hidden");
+  const panelControls = h("div", { class: "workspace-panel-controls" });
+  for (const [panel, label, icon] of [
+    ["inspector", "Toggle inspector", "M3 4h18v16H3V4zm2 2v12h9V6H5zm11 0v12h3V6h-3z"],
+    ["console", "Toggle terminal and editor", "M3 4h18v16H3V4zm2 2v12h14V6H5zm2 2 4 4-4 4-1.4-1.4 2.6-2.6-2.6-2.6L7 8zm5 6h5v2h-5v-2z"],
+  ]) {
+    const button = h("button", { class: "chat-reset", title: label, "aria-label": label, "aria-pressed": "false", onclick: () => {
+      const hidden = root.classList.toggle(`${panel}-hidden`);
+      button.setAttribute("aria-pressed", String(!hidden));
+      if (!hidden && panel === "console") terminal.sync();
+    } }, svg(icon, 16));
+    panelControls.append(button);
+  }
+  root.querySelector(".chat-toolbar")!.append(panelControls);
   function sync() {
     runView.sync();
     terminal.sync();
@@ -152,7 +166,7 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
     root.classList.toggle("full-workspace",enabled);
     if(fullscreen!==enabled) {
       fullscreen=enabled;
-      if(enabled) {contextPanel.append(context);activityPanel.append(activity);if(context instanceof HTMLDetailsElement)context.open=true;if(activity instanceof HTMLDetailsElement)activity.open=true;for(const panel of right.querySelectorAll<HTMLDetailsElement>("details"))panel.open=true;left.querySelector(".workspace-project-picker")!.append(projectPicker);}
+      if(enabled) {contextPanel.append(context);activityPanel.append(activity);if(context instanceof HTMLDetailsElement)context.open=true;if(activity instanceof HTMLDetailsElement)activity.open=true;left.querySelector(".workspace-project-picker")!.append(projectPicker);}
       else {contextAnchor.after(context);activityAnchor.after(activity);pickerAnchor.after(projectPicker);}
     }
     const project=State.settings.projects.find(project=>project.id===State.chatProjectId);

@@ -39,7 +39,29 @@ function sharedSounds(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [sharedSounds()],
+  plugins: [sharedSounds(), {
+    name: "local-voice-runtime",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (!req.url?.startsWith("/vendor/onnx/")) return next();
+        const name = req.url.slice("/vendor/onnx/".length).split("?")[0];
+        if (!/^ort-wasm[\w.-]+\.(wasm|mjs)$/.test(name)) return next();
+        const file = resolve(__dirname, "node_modules/onnxruntime-web/dist", name);
+        if (!existsSync(file)) return next();
+        res.setHeader("Content-Type", name.endsWith(".wasm") ? "application/wasm" : "text/javascript");
+        createReadStream(file).pipe(res);
+      });
+    },
+    closeBundle() {
+      const source = resolve(__dirname, "node_modules/onnxruntime-web/dist");
+      const out = resolve(__dirname, "dist/vendor/onnx");
+      mkdirSync(out, { recursive: true });
+      for (const name of readdirSync(source)) {
+        if (/^ort-wasm[\w.-]+\.(wasm|mjs)$/.test(name)) copyFileSync(join(source, name), join(out, name));
+      }
+    },
+  }],
+  worker: { format: "es" },
   clearScreen: false,
   server: { port: 1420, strictPort: true, host: "127.0.0.1", watch: { ignored: ["**/target/**", "**/release/**"] } },
   envPrefix: ["VITE_", "TAURI_ENV_"],

@@ -3,6 +3,7 @@ import { h, svg, clear } from "./dom";
 import { ICONS } from "./icons";
 import { Bridge, IS_TAURI, onEvent, type ChatContext, type ChatProgress, type ChatSource } from "../core/bridge";
 import { BrowserAI } from "../core/browser-ai";
+import { Voice } from "../core/voice";
 import { Sound } from "../core/sound";
 import { State, INTEGRATION_AGENTS, type ChatMessage } from "../core/state";
 import { profiles, selectAgent } from "../core/agents";
@@ -88,9 +89,10 @@ function bubble(message: ChatMessage, sources: ChatSource[] = [],openFile?:(path
     });
   }
   if (sources.length) {
-    const links = h("div", { class: "chat-sources" });
-    for (const source of sources) {
-      const link = h("a", { href: source.url, text: source.title });
+    const unique = [...new Map(sources.map(source => [source.url, source])).values()];
+    const links = h("details", { class: "chat-sources" }, h("summary", { text: `Sources · ${unique.length}` }));
+    for (const source of unique) {
+      const link = h("a", { href: source.url, text: source.title, title: source.url });
       link.addEventListener("click", (event) => { event.preventDefault(); void Bridge.openUrl(source.url); });
       links.append(link);
     }
@@ -317,24 +319,62 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   let voiceMode: "listen" | "speak" | null = null;
   let callActive = false;
   let voiceEpoch = 0;
-  let canListen = false;
-  let canSpeak = false;
-  let voiceError = IS_TAURI ? "Checking Windows speech…" : "Voice is available in the Windows app.";
-  if (IS_TAURI) void Bridge.voiceRun(crypto.randomUUID(), "capabilities").then(result => {
-    canListen = !!result.languages?.length;
-    canSpeak = !!result.voices?.length;
-    voiceError = !canListen ? "No Windows speech recognizer is installed. Install speech support for your language in Windows Settings." : !canSpeak ? "No Windows text-to-speech voice is installed." : "";
+  const canListen = !!navigator.mediaDevices?.getUserMedia;
+  const canSpeak = typeof AudioContext !== "undefined";
+  const voiceError = canListen ? "" : "Microphone access requires the Windows app or a secure browser.";
+  let callMuted = false;
+  let callInterrupted = false;
+  let callStarted = 0;
+  let voiceReady = false;
+  let downloadingVoice = false;
+  let callTimer: number | undefined;
+  function updateCallClock() {
+    const seconds = Math.floor((Date.now() - callStarted) / 1000);
+    callScreen.querySelector(".voice-call-title")!.textContent = `CouCou Voice · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  }
+  const callLabel = h("div", { class: "voice-call-state", role: "status" });
+  const callTranscript = h("div", { class: "voice-call-transcript" });
+  const callOrb = h("div", { class: "voice-call-orb", "aria-hidden": "true" }, h("i", {}), h("i", {}));
+  const callMute = h("button", { class: "voice-call-control", title: "Mute microphone", "aria-label": "Mute microphone", onclick: () => {
+    callMuted = !callMuted;
+    callMute.setAttribute("aria-pressed", String(callMuted));
+    if (callMuted && voiceMode === "listen") { callInterrupted = true; Voice.cancel(); }
+    else if (callMuted && voiceMode === "speak") Voice.stopListening();
     State.notify();
-  }).catch(error => { voiceError = String(error).replace(/^Error:\s*/, ""); State.notify(); });
+  } }, svg(ICONS.speakerOff, 20));
+  const interrupt = h("button", { class: "voice-call-control", title: "Interrupt and speak", "aria-label": "Interrupt and speak", onclick: () => {
+    callInterrupted = true; Voice.cancel(); if (State.chatBusy) stop();
+  } }, svg(ICONS.bubble, 20));
+  const endCall = h("button", { class: "voice-call-control end-call", title: "End call", "aria-label": "End call", onclick: () => {
+    stopVoice(); if (State.chatBusy) stop();
+  } }, svg(ICONS.xmark, 20));
+  const callScreen = h("div", { class: "voice-call", hidden: "true" }, h("span", { class: "voice-call-title", text: "CouCou Voice" }), callOrb, callLabel, callTranscript, h("div", { class: "voice-call-controls" }, callMute, interrupt, endCall));
+  el.querySelector(".chat-body")!.append(callScreen);
+  const downloadVoice = h("button", { class: "chat-reset", title: "Download local Whisper and English Kokoro voice", "aria-label": "Download voice models", onclick: async () => {
+    if (downloadingVoice) { Voice.cancel(); return; }
+    if (State.voiceBusy) return;
+    downloadingVoice = true;
+    State.voiceBusy = true; State.notify();
+    try {
+      const progress = (text: string) => { State.chatStatus = text; State.notify(); };
+      if (voiceReady) { State.chatStatus = "Speaking…"; await Voice.speak("Hi, I'm Mochi. Your English voice is ready, and speech recognition detects your language automatically.", progress); State.chatStatus = ""; }
+      else { await Voice.prepare(progress); voiceReady = true; State.chatStatus = "Local voice models ready"; downloadVoice.title = "Preview English voice"; downloadVoice.setAttribute("aria-label", "Preview English voice"); }
+    }
+    catch (error) { State.chatStatus = String(error); }
+    finally { downloadingVoice = false; State.voiceBusy = false; State.notify(); }
+  } }, svg("M11 3h2v9l3-3 1.4 1.4L12 16l-5.4-5.6L8 9l3 3V3zM4 17h2v3h12v-3h2v5H4v-5z", 14));
+  toolbar.append(downloadVoice);
 
   function stopVoice() {
     callActive = false;
+    downloadingVoice = false;
+    window.clearInterval(callTimer);
+    callTimer = undefined;
     voiceEpoch++;
-    const requestId = voiceRequestId;
     voiceRequestId = null;
     voiceMode = null;
     State.voiceBusy = false;
-    if (requestId) void Bridge.voiceCancel(requestId);
+    Voice.cancel();
     if (!State.chatBusy) State.chatStatus = "";
     State.notify();
   }
@@ -348,9 +388,14 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     State.chatStatus = mode === "listen" ? "Listening…" : "Speaking…";
     State.notify();
     try {
-      const result = await Bridge.voiceRun(requestId, mode, text, Math.round(State.settings.soundVolume * 100));
+      const progress = (value: string) => { if (voiceRequestId === requestId) { State.chatStatus = value; State.notify(); } };
+      const result = mode === "listen"
+        ? await Voice.listen(progress, level => callOrb.style.setProperty("--voice-level", String(level)))
+        : callActive && !callMuted
+          ? await Voice.speakAndListen(text, progress, () => { voiceMode = "listen"; State.chatStatus = "Listening…"; State.notify(); })
+          : await Voice.speak(text, progress);
       if (voiceRequestId !== requestId) throw new Error("Voice stopped");
-      return result.text || "";
+      return result;
     } finally {
       if (voiceRequestId === requestId) {
         voiceRequestId = null;
@@ -368,7 +413,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     State.notify();
   }
   State.subscribe(() => {
-    if ((voiceRequestId || callActive) && (State.view !== "prompt" || State.mode !== "expanded" || ((voiceMode === "speak" || callActive) && !State.settings.soundEnabled))) {
+    if ((voiceRequestId || callActive || downloadingVoice) && (State.view !== "prompt" || State.mode !== "expanded" || ((voiceMode === "speak" || callActive || (downloadingVoice && voiceReady)) && !State.settings.soundEnabled))) {
       const wasCall = callActive;
       stopVoice();
       if (wasCall && State.chatBusy) stop();
@@ -395,18 +440,32 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
   call.addEventListener("click", async () => {
     if (callActive) { stopVoice(); if (State.chatBusy) stop(); return; }
     callActive = true;
+    callMuted = false;
+    callStarted = Date.now();
+    callTimer = window.setInterval(updateCallClock, 1000);
     const epoch = ++voiceEpoch;
     State.notify();
     try {
+      let nextUtterance = "";
       while (callActive && voiceEpoch === epoch) {
-        const text = await runVoice("listen");
+        while (callMuted && callActive) await new Promise(resolve => window.setTimeout(resolve, 100));
         if (!callActive || voiceEpoch !== epoch) break;
+        callInterrupted = false;
+        let text: string;
+        try { text = nextUtterance || await runVoice("listen"); nextUtterance = ""; }
+        catch (error) { if (callInterrupted) continue; throw error; }
+        if (!callActive || voiceEpoch !== epoch) break;
+        if (!text) continue;
+        callTranscript.textContent = text;
         input.value = text;
         turnFinished = submit();
         await turnFinished;
         if (!callActive || voiceEpoch !== epoch) break;
-        if (State.chatStatus) { callActive = false; State.notify(); break; }
-        await runVoice("speak", spokenReply());
+        if (callInterrupted) continue;
+        if (State.chatStatus) { callActive = false; window.clearInterval(callTimer); callTimer = undefined; State.notify(); break; }
+        callTranscript.textContent = spokenReply();
+        try { nextUtterance = await runVoice("speak", spokenReply()); }
+        catch (error) { if (!callInterrupted) throw error; }
       }
     } catch (error) { if (voiceEpoch === epoch) voiceFailure(error); }
   });
@@ -798,12 +857,13 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
             State.droppedFile = null; State.promptContext = null; State.notify(); onHeightChange();
           } }, svg(ICONS.xmark, 10))));
       }
-      const key = JSON.stringify(State.chatHistory) + State.chatStatus + State.chatBusy + resetting;
+      const key = JSON.stringify(State.chatHistory) + State.chatBusy + State.voiceBusy + resetting;
       if (key !== renderedKey) {
         const follow = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
         const previousTop = log.scrollTop;
         renderedKey = key;
         clear(log);
+        if (!State.chatHistory.length && !State.chatBusy) log.append(h("div", { class: "chat-empty" }, h("span", { text: "What can I help with?" })));
         for (const message of State.chatHistory) if (message.content) {
           const row = bubble(message, sources.get(message.id),(path,line)=>{if(!State.fullscreen)toggleFullscreen();void workspace.openFile(path,line);});
           const actions = h("div", { class: "message-actions" });
@@ -815,9 +875,9 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
           if (message.status === "stopped") actions.append(h("span", { text: "Stopped" }));
           row.append(actions); log.append(row);
         }
-        status.textContent = State.chatStatus;
         log.scrollTop = follow ? log.scrollHeight : previousTop;
       }
+      status.textContent = State.chatStatus;
       clear(send);
       send.append(svg(State.chatBusy ? ICONS.xmark : ICONS.arrowUp, 11));
       send.title = State.chatBusy ? "Stop reply" : "Send";
@@ -827,7 +887,14 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
       queueButton.disabled = resetting || stopping || desktopBusy;
       send.disabled = stopping || resetting || (desktopBusy && !State.chatBusy);
       reset.disabled = resetting;
-      microphone.disabled = !canListen || State.chatBusy;
+      microphone.disabled = !canListen || State.chatBusy || (State.voiceBusy && !voiceMode && !callActive);
+      callScreen.hidden = !callActive;
+      callScreen.dataset.phase = callMuted ? "muted" : voiceMode || (State.chatBusy ? "thinking" : "ready");
+      callLabel.textContent = callMuted ? "Microphone muted" : State.chatStatus || "Ready to listen";
+      callMute.title = callMuted ? "Unmute microphone" : "Mute microphone";
+      callMute.setAttribute("aria-label", callMute.title);
+      if (callActive) updateCallClock();
+      (downloadVoice as HTMLButtonElement).disabled = (State.voiceBusy && !downloadingVoice) || State.chatBusy || (voiceReady && !State.settings.soundEnabled);
       microphone.title = voiceMode || callActive ? "Stop voice" : voiceError || "Microphone";
       microphone.setAttribute("aria-label", voiceMode || callActive ? "Stop voice" : "Microphone");
       microphone.classList.toggle("voice-active", voiceMode === "listen");
@@ -835,7 +902,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
       call.title = callActive ? "End voice call" : voiceError || "Start voice call";
       call.setAttribute("aria-label", callActive ? "End voice call" : "Start voice call");
       call.classList.toggle("voice-active", callActive);
-      readAloud.disabled = !canSpeak || !State.settings.soundEnabled || State.chatBusy || voiceMode === "listen" || !spokenReply();
+      readAloud.disabled = !canSpeak || !State.settings.soundEnabled || State.chatBusy || (State.voiceBusy && voiceMode !== "speak") || !spokenReply();
       readAloud.title = voiceMode === "speak" ? "Stop speaking" : voiceError || "Read reply aloud";
       readAloud.setAttribute("aria-label", voiceMode === "speak" ? "Stop speaking" : "Read reply aloud");
       readAloud.classList.toggle("voice-active", voiceMode === "speak");

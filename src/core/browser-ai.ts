@@ -239,7 +239,7 @@ class BrowserAIClient {
     let timeoutId: number | undefined;
     const timeout = new Promise<never>((_resolve, reject) => {
       let remaining=timeoutSeconds*1000;let last=performance.now();
-      timeoutId = globalThis.setInterval(() => {
+      timeoutId = window.setInterval(() => {
         const now=performance.now();if(!this.paused)remaining-=now-last;last=now;if(remaining>0)return;
         const error = new Error(`The browser model took longer than ${timeoutSeconds} seconds. Try a smaller model or increase the request timeout in Settings.`);
         this.abort(active, error);
@@ -275,7 +275,7 @@ class BrowserAIClient {
 
     let initTimeoutId: number | undefined;
     const initTimeout = new Promise<never>((_resolve, reject) => {
-      initTimeoutId = globalThis.setTimeout(() => {
+      initTimeoutId = window.setTimeout(() => {
         const error = new Error("Browser model initialization exceeded 10 minutes. Check the connection and try again.");
         this.abort(active, error);
         reject(error);
