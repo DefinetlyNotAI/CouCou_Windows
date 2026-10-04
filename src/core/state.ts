@@ -6,6 +6,7 @@ import type { AgentProfile } from "./agents";
 import type { Project } from "./projects";
 import type { AgentRun } from "./runs";
 import {Bridge,IS_TAURI} from "./bridge";
+import {isSavedChat} from "./chat-data";
 
 export type AgentSource = "ollama" | "n8n" | "local";
 export type PillBadge = "finished" | "error";
@@ -247,10 +248,7 @@ class AppState {
       if(IS_TAURI && data==="[]" && legacy){await Bridge.chatsSave(legacy);data=legacy;}
       if(IS_TAURI)localStorage.removeItem("coucou.chats");
       const value: unknown = JSON.parse(data);
-      if (Array.isArray(value)) this.savedChats = value.filter((chat): chat is SavedChat =>
-        chat && typeof chat.id === "string" && typeof chat.title === "string" && typeof chat.updatedAt === "number" &&
-        Array.isArray(chat.messages) && chat.messages.every((message: ChatMessage) =>
-          typeof message.id === "number" && (message.role === "user" || message.role === "assistant") && typeof message.content === "string"));
+      if (Array.isArray(value)) this.savedChats = value.filter(isSavedChat);
       this.notify();
     } catch(error) { this.chatStatus=`Could not load chats: ${String(error)}`;this.chatsLoaded=false;this.notify(); }
   }

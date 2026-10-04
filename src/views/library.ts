@@ -1,5 +1,6 @@
 import {h} from "./dom";
-import {State,type SavedChat} from "../core/state";
+import {State} from "../core/state";
+import {isSavedChat} from "../core/chat-data";
 import {reopenChat} from "./chat";
 import {Bridge} from "../core/bridge";
 function encoded(bytes:Uint8Array){let text="";for(const byte of bytes)text+=String.fromCharCode(byte);return btoa(text);}
@@ -20,7 +21,7 @@ export function buildLibrary() {
   file.addEventListener("change",async()=> {try {
     if(!file.files?.[0])return;let value=JSON.parse(await file.files[0].text());
     if(value.format==="coucou-encrypted-1"){if(!password.value)throw new Error("Enter the backup password");const plaintext=await crypto.subtle.decrypt({name:"AES-GCM",iv:decoded(value.iv).buffer as ArrayBuffer},await key(password.value,decoded(value.salt)),decoded(value.data).buffer as ArrayBuffer);value=JSON.parse(new TextDecoder().decode(plaintext));}
-    if(value.format!=="coucou-backup-1"||!Array.isArray(value.chats)||value.chats.some((chat:SavedChat)=>typeof chat.id!=="string"||typeof chat.title!=="string"||typeof chat.updatedAt!=="number"||!Array.isArray(chat.messages)||chat.messages.some(message=>!["user","assistant"].includes(message.role)||typeof message.content!=="string"||typeof message.id!=="number")))throw new Error("Invalid Coucou backup");
+    if(value?.format!=="coucou-backup-1"||!Array.isArray(value.chats)||!value.chats.every(isSavedChat))throw new Error("Invalid Coucou backup");
     if(State.chatBusy)throw new Error("Stop generation before importing");
     const chats=new Map(State.savedChats.map(chat=>[chat.id,chat]));for(const chat of value.chats)chats.set(chat.id,chat);State.savedChats=[...chats.values()];State.persistChats();
     if(value.settings && confirm("Also restore settings and agent profiles from this backup?")){const settings={...State.settings,...value.settings};await Bridge.saveSettings(settings);State.settings=settings;}
