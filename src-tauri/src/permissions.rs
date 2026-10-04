@@ -47,6 +47,8 @@ pub async fn authorize<R: tauri::Runtime>(app: &AppHandle<R>, request: &ToolRequ
     });
     if decision.as_deref() == Some("deny") { return Err("Tool denied by permission settings".into()); }
     if decision.as_deref() == Some("allow") { return Ok(()); }
+    // Public research is already authorized by the chat; explicit denials above still win.
+    if decision.is_none() && matches!(request.name.as_str(), "web.search" | "web.fetch" | "web.extract" | "agent.plan" | "agent.delegate") { return Ok(()); }
     if let Some(permission) = settings.active_agent().and_then(|profile| profile["permissions"].get(&request.name)).and_then(Value::as_str) {
         if permission == "deny" { return Err("Tool denied by agent profile".into()); }
     }
@@ -83,6 +85,21 @@ mod tests {
     use super::*;
     use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
     use tauri::Listener;
+
+    #[test]
+    fn research_defaults_do_not_prompt_and_explicit_denials_win() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let app = tauri::test::mock_app();
+            app.manage(Shared { settings: Mutex::new(crate::settings::Settings::default()), gate: Arc::new(crate::island::PollGate::new()) });
+            for name in ["web.search", "web.fetch", "web.extract", "agent.plan", "agent.delegate"] {
+                let request = ToolRequest { name: name.into(), input: json!({"query":"weather","url":"https://example.com"}), chat_id: "research-defaults".into(), project_id: String::new() };
+                authorize(app.handle(), &request).await.unwrap();
+                let key = format!("{}:{name}", crate::tools::category(name).unwrap());
+                app.state::<Shared>().settings.lock().unwrap().tool_permissions.insert(key, "deny".into());
+                assert_eq!(authorize(app.handle(), &request).await.unwrap_err(), "Tool denied by permission settings");
+            }
+        });
+    }
 
     #[test]
     fn concurrent_approval_ids_are_unique() {
