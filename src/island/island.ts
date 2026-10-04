@@ -4,7 +4,7 @@ import { Bridge, IS_TAURI, onDragDrop } from "../core/bridge";
 import {
   EXPANDED_CORNER, EXPANDED_W, NOTCH_W,
   ROUNDED_CORNER, VIEW_LAYOUTS, botGlowColor, botGlowOpacity, botPosition, chatPromptHeight,
-  islandSize,
+  islandSize, containsIslandPoint,
   type IslandMode, type IslandViewName,
 } from "../core/layout";
 import { Sound } from "../core/sound";
@@ -83,7 +83,6 @@ export class Island {
   private botHovering = false;
   private botHoverTimer: number | null = null;
   private lastLoveTime = -Infinity;
-  private botHoverStart = { x: 0, y: 0 };
 
   private confusedRecovery: number | null = null;
   private prevViewBeforeConfused: IslandViewName = "overview";
@@ -309,7 +308,7 @@ export class Island {
       State.isPinned = enabled || this.pinBeforeFullscreen;
       this.fsm.pinned = State.isPinned;
       this.fsm.forceHome();
-      State.view = view;
+      State.view = enabled && view === "overview" ? "prompt" : view;
       this.root.classList.toggle("fullscreen", enabled);
       this.animateGeometry(false);
       State.notify();
@@ -349,16 +348,20 @@ export class Island {
 
   // ── File drop ───────────────────────────────────────────────────────────────
 
-  private onDragDrop(e: { type: string; paths?: string[] }) {
+  private onDragDrop(e: { type: string; paths?: string[]; position?:{x:number;y:number} }) {
     if (e.type !== "over") void Bridge.log(`drag ${e.type} ${e.paths?.length ?? 0} file(s)`);
     if (this.visibilityBlocked) return;
+    const point=e.position ?? State.mouse;
+    const inside=containsIslandPoint(this.islandRect(),point,this.radius.value);
     switch (e.type) {
       case "enter":
       case "over": {
         this.fileDragging = true;
-        const rect = this.islandRect();
-        const mouse = State.mouse;
-        if (mouse.x < rect.x || mouse.x > rect.x + rect.w || mouse.y < rect.y || mouse.y > rect.y + rect.h) return;
+        if (!inside) {
+          if(State.fileDragOver) {State.fileDragOver=false;this.engine.animateMorph(0);UploadSeq.exitZone();State.notify();}
+          return;
+        }
+        this.onCursor(point.x,point.y);
         if (State.fileDragOver) return;
         State.fileDragOver = true;
         this.engine.animateMorph(1);
@@ -381,6 +384,7 @@ export class Island {
       case "drop": {
         this.fileDragging = false;
         State.fileDragOver = false;
+        if(!inside) {UploadSeq.deactivate();this.engine.animateMorph(0);if(State.view==="upload")this.setView(State.defaultView());return;}
         const path = e.paths?.[0];
         if (!path) {
           this.engine.animateMorph(0);
@@ -466,7 +470,7 @@ export class Island {
         ? Math.min(State.settings.chatHeight, window.innerHeight,
           chatPromptHeight(State.chatHistory.length, State.settings.chatHeight)
           + (State.chatStatus ? 34 : 0)
-          + (State.quickActionsExpanded ? 110 : 0) + (State.toolActivityExpanded && State.toolActivity.length ? 70 : 0) + (State.promptQueue.length ? 50 : 0)) : h,
+          + (State.promptQueue.length ? 30 : 0)) : Math.min(h,window.innerHeight),
       r,
     };
   }
@@ -620,19 +624,16 @@ export class Island {
     this.wasInIsland = inIsland;
 
     // Bot hover → love
-    const overBot = State.mode === "expanded" && State.stateOverride == null && this.isBotHit(x, y);
-    if (overBot && !this.botHovering) this.botHoverIn(x, y);
+    this.updateBotHover();
+    this.ensureRunning();
+  }
+
+  private updateBotHover() {
+    const overBot = State.mode !== "hidden" && State.stateOverride == null && !this.uploadActive && this.isBotHit(State.mouse.x, State.mouse.y);
+    if (overBot && !this.botHovering) this.botHoverIn();
     if (!overBot && this.botHovering) this.cancelBotHover();
     this.botHovering = overBot;
-    if (this.botHovering) {
-      const d = Math.hypot(x - this.botHoverStart.x, y - this.botHoverStart.y);
-      if (d > 40) {
-        this.botHoverStart = { x, y };
-        this.scheduleLove();
-      }
-    }
 
-    this.ensureRunning();
   }
 
   private isBotHit(x: number, y: number): boolean {
@@ -640,13 +641,11 @@ export class Island {
     const rect = this.islandRect();
     const cx = rect.x + this.botCx.value;
     const cy = rect.y + this.botCy.value;
-    const radius = this.botSize.value / 2;
+    const radius = this.botSize.value * 0.34;
     return (x - cx) ** 2 + (y - cy) ** 2 <= radius * radius;
   }
 
-  private botHoverIn(x: number, y: number) {
-    if (performance.now() / 1000 - this.lastLoveTime < 6) return;
-    this.botHoverStart = { x, y };
+  private botHoverIn() {
     this.engine.blink();
     this.engine.tgEs = 1.08;
     Sound.play("hover");
@@ -658,17 +657,19 @@ export class Island {
     this.botHoverTimer = window.setTimeout(() => {
       this.botHoverTimer = null;
       if (!this.botHovering || State.stateOverride != null) return;
-      if (performance.now() / 1000 - this.lastLoveTime < 6) return;
       this.lastLoveTime = performance.now() / 1000;
-      this.engine.triggerEmote("love");
+      this.engine.triggerEmote("love",2.4);
       Sound.play("love");
       this.ensureRunning();
-    }, 1900);
+      this.scheduleLove();
+    }, this.lastLoveTime===-Infinity ? 3000 : 1600);
   }
 
   private cancelBotHover() {
+    this.botHovering=false;
     if (this.botHoverTimer != null) window.clearTimeout(this.botHoverTimer);
     this.botHoverTimer = null;
+    this.lastLoveTime=-Infinity;
     this.engine.tgEs = 1;
   }
 
@@ -719,6 +720,7 @@ export class Island {
     this.botCx.step(dt);
     this.botCy.step(dt);
     this.botSize.step(dt);
+    this.updateBotHover();
 
     const greetingActive = State.mode === "expanded" && State.view === "greeting";
     if (greetingActive) {
@@ -816,14 +818,15 @@ export class Island {
       this.botCanvas.style.height = `${hCss}px`;
     }
     this.botCanvas.style.left = `${this.botCx.value - w / 2}px`;
-    this.botCanvas.style.top = `${this.botCy.value - BOT_OVERHANG / 2 - hCss / 2}px`;
+    const canvasTop=this.botCy.value-BOT_OVERHANG/2-hCss/2;
+    this.botCanvas.style.top = `${Math.max(0,canvasTop)}px`;
 
     const ctx = this.botCanvas.getContext("2d");
     if (!ctx) return;
 
     const focus = State.focusTask;
     this.engine.bodyColor = focus?.isIntegration ? hexToRGB(focus.color) : null;
-    this.engine.particleOverhang = BOT_OVERHANG;
+    this.engine.particleOverhang = BOT_OVERHANG + 2*Math.min(0,canvasTop);
     this.engine.lookX = this.lookX();
     this.engine.lookY = State.handoffs.some(item => item.status === "working") ? 0.65 : this.lookY();
     if (this.engine.morph > 0.3) {

@@ -45,3 +45,4 @@ windows = { version = "0.61", features = [
   "Win32_UI_Controls_Dialogs",
   "Win32_UI_WindowsAndMessaging",
 ] }
+portable-pty = "0.9.0"

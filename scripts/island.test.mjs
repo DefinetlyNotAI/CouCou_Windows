@@ -6,6 +6,16 @@ import ts from "typescript";
 const source = readFileSync(new URL("../src/island/fsm.ts", import.meta.url), "utf8");
 const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } });
 const { IslandStateMachine } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`);
+const layout = ts.transpileModule(readFileSync(new URL("../src/core/layout.ts", import.meta.url), "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+const { containsIslandPoint } = await import(`data:text/javascript;base64,${Buffer.from(layout).toString("base64")}`);
+test("drops must touch the visible island, including its rounded edge", () => {
+  const rect={x:100,y:0,w:200,h:80};
+  assert.equal(containsIslandPoint(rect,{x:99,y:40},20),false);
+  assert.equal(containsIslandPoint(rect,{x:200,y:81},20),false);
+  assert.equal(containsIslandPoint(rect,{x:100,y:80},20),false);
+  assert.equal(containsIslandPoint(rect,{x:120,y:75},20),true);
+  assert.equal(containsIslandPoint({...rect,h:0},{x:200,y:0},20),false);
+});
 const timers = new Map();
 let nextTimer = 0;
 globalThis.window = {

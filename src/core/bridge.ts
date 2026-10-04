@@ -2,7 +2,7 @@
 // page is opened in a plain browser, so the island can be iterated on with
 // `npm run dev` alone.
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, Channel } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { Settings } from "./state";
@@ -76,6 +76,13 @@ export const Bridge = {
   chatCancel: (requestId: string) => call<void>("chat_cancel", { requestId }),
   chatPause:(paused:boolean)=>callOrThrow<void>("chat_pause",{paused}),
   toolRun: (request: { name: string; input: Record<string, unknown>; chatId: string; projectId?: string }) => callOrThrow<unknown>("tool_run", { request }),
+  terminalOpen: (id:string,cwd:string,chatId:string,projectId:string,cols:number,rows:number,onOutput:(event:{data?:number[];exit?:boolean;error?:string})=>void) => {
+    const output=new Channel<{data?:number[];exit?:boolean;error?:string}>();output.onmessage=onOutput;
+    return callOrThrow<void>("terminal_open",{id,cwd,chatId,projectId,cols,rows,output});
+  },
+  terminalInput:(id:string,data:string)=>callOrThrow<void>("terminal_input",{id,data}),
+  terminalResize:(id:string,cols:number,rows:number)=>callOrThrow<void>("terminal_resize",{id,cols,rows}),
+  terminalClose:(id:string)=>callOrThrow<void>("terminal_close",{id}),
   toolDecision: (id: string, decision: string) => callOrThrow<void>("tool_decision", { id, decision }),
   projectAttach: (folder: string) => callOrThrow<{ folder:string; name:string; gitRepo:string }>("project_attach",{folder}),
   toolSchemas: (chatId?: string, projectId?: string) => callOrThrow<unknown[]>("tool_schemas", { chatId, projectId }),
@@ -130,13 +137,16 @@ export type BridgeEvent =
 export interface DragDropPayload {
   type: "enter" | "over" | "drop" | "leave";
   paths?: string[];
+  position?: { x:number; y:number };
 }
 
 /** Files dragged onto the island. Only reaches us when the window takes the mouse. */
 export async function onDragDrop(handler: (e: DragDropPayload) => void) {
   if (!IS_TAURI) return () => {};
   return getCurrentWebview().onDragDropEvent((event) => {
-    handler(event.payload as DragDropPayload);
+    const payload = event.payload as DragDropPayload;
+    const scale = window.devicePixelRatio || 1;
+    handler({ ...payload, position: payload.position ? { x:payload.position.x / scale, y:payload.position.y / scale } : undefined });
   });
 }
 

@@ -6,6 +6,7 @@ import { buildServices } from "./services";
 import { buildBackground } from "./background";
 import { buildStats } from "./stats";
 import { buildLibrary } from "./library";
+import { buildTerminal } from "./terminal";
 export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTMLElement,projectPicker:HTMLElement,pause:(paused:boolean)=>void,stop:()=>void) {
   const contextAnchor=document.createComment("context");context.before(contextAnchor);
   const activityAnchor=document.createComment("activity");activity.before(activityAnchor);
@@ -20,16 +21,33 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
   const runView=buildRuns(pause,stop,async()=> {try {const result=await tool("git.diff",{cwd:cwd()});output.textContent=String(result.stdout||"");}catch {}});
   const left=h("aside",{class:"workspace-pane workspace-left"},h("h3",{text:"Project"}),h("div",{class:"workspace-project-picker"}),h("h3",{text:"Files"}),fileTree);
   const right=h("aside",{class:"workspace-pane workspace-right"});
+  const terminal=buildTerminal();
+  const folder=h("input",{placeholder:"Existing folder path","aria-label":"Project folder"}) as HTMLInputElement;
+  const projectName=h("input",{placeholder:"Project name (optional)","aria-label":"Project name"}) as HTMLInputElement;
+  const projectForm=h("details",{class:"workspace-new-project"},h("summary",{text:"+ Project"}),projectName,folder);
+  const create=h("button",{text:"Create project",onclick:async()=>{
+    create.disabled=true;
+    try {
+      const result=await Bridge.projectAttach(folder.value.trim());
+      const existing=State.settings.projects.find(item=>item.folder.toLowerCase()===result.folder.toLowerCase());
+      const id=existing?.id||crypto.randomUUID();
+      const settings=structuredClone(State.settings);
+      if(!existing)settings.projects.push({id,name:projectName.value.trim()||result.name,folder:result.folder,gitRepo:result.gitRepo,agentId:"",instructions:"",memory:"",mcpServers:[],permissions:{}});
+      settings.activeProjectId=id;await Bridge.saveSettings(settings);State.settings=settings;State.chatProjectId=id;State.saveChat();State.notify();
+      folder.value="";projectName.value="";(projectForm as HTMLDetailsElement).open=false;
+    }catch(error){notice.textContent=String(error);}finally{create.disabled=false;}
+  }}) as HTMLButtonElement;
+  projectForm.append(create);left.querySelector(".workspace-project-picker")!.after(projectForm);
   const contextPanel=h("div",{});
   const activityPanel=h("div",{});
-  function tabs(items:[string,HTMLElement][],label:string) {
+  function tabs(items:[string,HTMLElement][],label:string,initial=0) {
     const nav=h("div",{class:"workspace-tabs",role:"tablist","aria-label":label});
     const body=h("div",{class:"workspace-tab-body"});
     const buttons:HTMLButtonElement[]=[];
     items.forEach(([title,panel],index)=> {
       const id=`workspace-${label.toLowerCase()}-${index}`;
-      panel.id=id;panel.classList.add("workspace-tab-panel");panel.setAttribute("role","tabpanel");panel.hidden=index!==0;
-      const button=h("button",{text:title,role:"tab","aria-controls":id,"aria-selected":String(index===0),onclick:()=> {
+      panel.id=id;panel.classList.add("workspace-tab-panel");panel.setAttribute("role","tabpanel");panel.hidden=index!==initial;
+      const button=h("button",{text:title,role:"tab","aria-controls":id,"aria-selected":String(index===initial),onclick:()=> {
         items.forEach(([,target],position)=> {target.hidden=position!==index;buttons[position].setAttribute("aria-selected",String(position===index));});
       }}) as HTMLButtonElement;
       button.addEventListener("keydown",event=> {
@@ -102,7 +120,6 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
     (name.startsWith("git.")?gitActions:name.startsWith("coding.")?checkActions:name.endsWith("search")?searchActions:terminalActions).append(button);return button;
   }
   const cwd=()=>State.settings.projects.find(project=>project.id===State.chatProjectId)?.gitRepo || State.settings.projects.find(project=>project.id===State.chatProjectId)?.folder || "";
-  action("Run","powershell.run",()=>({script:script.value,cwd:cwd()}));
   action("Git status","git.status",()=>({cwd:cwd()}));action("Diff","git.diff",()=>({cwd:cwd()}));
   action("Staged diff","git.diff",()=>({cwd:cwd(),staged:true}));
   const files=()=>gitFiles.value.split(/\r?\n/).map(file=>file.trim()).filter(Boolean);
@@ -117,11 +134,11 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
   action("Build","coding.build",()=>({...(script.value.trim()?{script:script.value}:{}),cwd:cwd()}));
   const footer=h("section",{class:"workspace-pane workspace-bottom"},tabs([
     ["Editor",h("div",{class:"workspace-editor-panel"},h("div",{class:"workspace-editor-header"},fileLabel,save),editor)],
-    ["Terminal",h("div",{},script,terminalActions)],
+    ["Terminal",terminal.el],
     ["Git",h("div",{},h("div",{class:"workspace-command-row"},gitFiles,commitMessage,branchName),gitActions)],
     ["Search",h("div",{},search,searchActions)],
-    ["Checks",h("div",{},checkActions)],
-  ],"Console"),notice,outputFiles,output);
+    ["Checks",h("div",{},script,checkActions)],
+  ],"Console",1),notice,outputFiles,output);
   right.append(tabs([
     ["Context",contextPanel],["Tools",activityPanel],["Run",h("div",{},runView.el,runStatus)],
     ["Services",buildServices(tool)],["Tasks",buildBackground()],["Stats",buildStats()],["Chats",buildLibrary()],
@@ -129,12 +146,13 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
   root.prepend(left);root.append(right,footer);
   function sync() {
     runView.sync();
+    terminal.sync();
     const enabled=State.fullscreen;
     projectPicker.dataset.workspaceBusy=String(busy);
     root.classList.toggle("full-workspace",enabled);
     if(fullscreen!==enabled) {
       fullscreen=enabled;
-      if(enabled) {contextPanel.append(context);activityPanel.append(activity);left.querySelector(".workspace-project-picker")!.append(projectPicker);}
+      if(enabled) {contextPanel.append(context);activityPanel.append(activity);if(context instanceof HTMLDetailsElement)context.open=true;if(activity instanceof HTMLDetailsElement)activity.open=true;for(const panel of right.querySelectorAll<HTMLDetailsElement>("details"))panel.open=true;left.querySelector(".workspace-project-picker")!.append(projectPicker);}
       else {contextAnchor.after(context);activityAnchor.after(activity);pickerAnchor.after(projectPicker);}
     }
     const project=State.settings.projects.find(project=>project.id===State.chatProjectId);

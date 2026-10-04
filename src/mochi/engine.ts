@@ -1069,8 +1069,8 @@ export class BotEngine {
       const k = p.age / p.life;
       const a = k < 0.2 ? k / 0.2 : 1 - (k - 0.2) / 0.8;
       const px = cx + (p.x + p.vx * p.age) * R * 1.3;
-      const py = cy + (p.y + p.vy * p.age) * R * 1.3;
       const sz = R * p.size * (1 + k * 0.4);
+      const py = Math.max(sz+2,cy + (p.y + p.vy * p.age) * R * 1.3);
 
       x.save();
       x.translate(px, py);

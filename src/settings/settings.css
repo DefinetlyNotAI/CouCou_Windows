@@ -276,3 +276,6 @@ select option {
 .row > label { flex: 0 0 132px; }
 @media (max-width: 600px) { :root .agent-editor { grid-template-columns: minmax(0, 1fr); } }
 input:focus-visible,select:focus-visible,textarea:focus-visible { outline: 2px solid #93e5b1; outline-offset: 2px; }
+.preference-group { border-top:1px solid rgba(255,255,255,.1); padding:10px 0; }
+.preference-group > summary { cursor:pointer; font-size:13px; color:var(--ink); padding:4px 0; }
+.preference-group[open] > summary { margin-bottom:8px; }

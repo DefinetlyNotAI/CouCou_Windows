@@ -109,6 +109,7 @@ export function buildPrompt(onHeightChange: () => void, onTaskSelect: (id: strin
     const run=State.runs.find(run=>run.id===State.chatRequestId);
     if(run)run.permissions.push({id:event.id,tool:event.request.name,category:event.category});
     State.view = "prompt"; State.mode = "expanded";
+    if (!State.fullscreen) toggleFullscreen();
     const detail = h("pre", { text: JSON.stringify(event.request.input, null, 2) });
     const row = h("div", { class: "tool-permission" }, h("strong", { text: `${event.request.name} · ${event.category}` }), detail);
     const controls = h("div", { class: "permission-controls" });

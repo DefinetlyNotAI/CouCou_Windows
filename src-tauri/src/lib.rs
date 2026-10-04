@@ -9,6 +9,7 @@ mod ollama;
 mod voice;
 mod desktop;
 mod tools;
+mod terminal;
 mod web;
 mod mcp;
 mod index;
@@ -463,8 +464,10 @@ pub fn run() {
         .manage(Chat::default())
         .manage(background::Background::default())
         .manage(voice::Voice::default())
+        .manage(terminal::Terminals::default())
         .invoke_handler(tauri::generate_handler![
             system_stats,
+            terminal::terminal_open,terminal::terminal_input,terminal::terminal_resize,terminal::terminal_close,
             model_manage,
             chats_load,chats_save,
             boot,

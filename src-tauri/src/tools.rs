@@ -22,7 +22,7 @@ pub fn category(name: &str) -> Option<&'static str> {
         "project.index" | "project.search" => "read",
         "agent.plan" | "agent.delegate" => "read",
         "filesystem.write" | "git.stage" | "git.unstage" | "git.commit" | "git.branch" => "write",
-        "terminal.run" | "powershell.run" | "system.process.kill" => "run",
+        "terminal.open" | "terminal.run" | "powershell.run" | "system.process.kill" => "run",
         "system.process.list" | "system.notification.send" => "desktop",
         "system.clipboard.read" | "system.clipboard.write" => "clipboard",
         "system.screenshot" => "screen",

@@ -56,6 +56,17 @@ export const EXPANDED_CORNER = 22;
 export const WAKE_STRIP_W = 240;
 export const WAKE_STRIP_H = 6;
 
+export function containsIslandPoint(rect:{x:number;y:number;w:number;h:number}, point:{x:number;y:number}, radius:number):boolean {
+  const x=point.x-rect.x,y=point.y-rect.y;
+  if(rect.h<=0 || x<0 || x>rect.w || y<0 || y>rect.h)return false;
+  const r=Math.min(radius,rect.w/2,rect.h/2);
+  if(y>rect.h-r && (x<r || x>rect.w-r)) {
+    const cx=x<r?r:rect.w-r;
+    return (x-cx)**2+(y-(rect.h-r))**2<=r**2;
+  }
+  return true;
+}
+
 export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
   overview: { height: 200, botX: 68, botY: null, botDiameter: 58, agentMode: "none" },
   empty: { height: 160, botX: 70, botY: null, botDiameter: 62, agentMode: "none" },

@@ -22,7 +22,14 @@ export function agentsSection(settings: Settings, save: () => Promise<void>): HT
       field("Name", selected.name, value => { selected.name = value.trim() || "Agent"; render(); }),
       field("Model", selected.model, value => selected.model = value.trim()),
       field("System prompt", selected.systemPrompt, value => selected.systemPrompt = value, true),
-      ...Object.keys(selected.personality).map(key => field(key.replace(/([A-Z])/g, " $1"), selected.personality[key as keyof typeof selected.personality], value => selected.personality[key as keyof typeof selected.personality] = value)),
+      ...Object.keys(selected.personality).map(key => {
+        const label=key.replace(/([A-Z])/g," $1").replace(/^./,letter=>letter.toUpperCase());
+        const options:Record<string,string[]>={baseStyle:["Clear","Professional","Conversational","Concise"],warmth:["Balanced","Warm","Neutral"],enthusiasm:["Balanced","Enthusiastic","Reserved"],directness:["Direct","Balanced","Gentle"],responseLength:["Adaptive","Short","Detailed"],headers:["When useful","Always","Never"],lists:["When useful","Prefer lists","Prefer prose"],emoji:["Rare","None","Often"],technicalDepth:["Adaptive","Beginner","Expert"]};
+        const value=selected.personality[key as keyof typeof selected.personality];
+        const control=h("select",{"aria-label":label},...[...new Set([value,...(options[key]||[])])].map(option=>h("option",{value:option,text:option}))) as HTMLSelectElement;
+        control.value=value;control.addEventListener("change",()=>{selected.personality[key as keyof typeof selected.personality]=control.value;persist();});
+        return h("label",{class:"agent-field"},h("span",{text:label}),control);
+      }),
       field("Tools (one per line; empty uses available tools)", selected.tools.join("\n"), value => selected.tools = value.split(/\r?\n/).map(item => item.trim()).filter(Boolean), true),
       field("MCP servers (one ID per line)", selected.mcpServers.join("\n"), value => selected.mcpServers = value.split(/\r?\n/).map(item => item.trim()).filter(Boolean), true),
       field("Permissions (JSON)", JSON.stringify(selected.permissions, null, 2), value => {
@@ -32,7 +39,7 @@ export function agentsSection(settings: Settings, save: () => Promise<void>): HT
           selected.permissions = permissions;
         } catch { window.alert("Permissions must be a JSON object with string values."); }
       }, true),
-      field("Context size", String(selected.contextSize), value => { const count = Number(value); if (Number.isFinite(count)) selected.contextSize = Math.max(512, Math.min(131072, Math.round(count))); }),
+      field("Minimum context (grows automatically)", String(selected.contextSize), value => { const count = Number(value); if (Number.isFinite(count)) selected.contextSize = Math.max(512, Math.min(131072, Math.round(count))); }),
       field("Temperature", String(selected.temperature), value => { const number = Number(value); if (Number.isFinite(number)) selected.temperature = Math.max(0, Math.min(2, number)); }),
       field("Workspace", selected.workspace, value => selected.workspace = value.trim()),
     );
