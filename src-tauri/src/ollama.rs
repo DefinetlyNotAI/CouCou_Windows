@@ -96,6 +96,7 @@ pub struct ModelInfo {
     pub tools: bool,
     pub vision: bool,
     pub thinking: bool,
+    pub context_size: u64,
 }
 
 fn progress(id: &str, phase: &str, text: &str, tool: Option<&str>) -> ChatProgress {
@@ -178,7 +179,21 @@ pub async fn model_info(url: &str, model: &str) -> Result<ModelInfo, String> {
     let has = |name: &str| {
         capabilities.is_some_and(|values| values.iter().any(|v| v.as_str() == Some(name)))
     };
-    Ok(ModelInfo { tools: has("tools"), vision: has("vision"), thinking: has("thinking") })
+    let context_size = body["model_info"].as_object().into_iter().flat_map(|fields| fields.iter())
+        .filter(|(key, _)| key.ends_with(".context_length"))
+        .filter_map(|(_, value)| value.as_u64()).filter(|value| *value > 0).max().unwrap_or(131072);
+    Ok(ModelInfo { tools: has("tools"), vision: has("vision"), thinking: has("thinking"), context_size })
+}
+
+fn context_window(messages: &[Value], tools: &[Value], minimum: u64, limit: u64) -> Result<u64, String> {
+    let bytes: usize = messages.iter().map(|message| {
+        message["content"].as_str().unwrap_or_default().len()
+            + message.get("tool_calls").map(|calls| calls.to_string().len()).unwrap_or(0)
+            + message["images"].as_array().map(|images| images.len() * 8192).unwrap_or(0) + 64
+    }).sum::<usize>() + tools.iter().map(|tool| tool.to_string().len()).sum::<usize>();
+    let needed = (bytes as u64).div_ceil(2) + 2048;
+    if needed > limit { return Err(format!("This conversation needs about {needed} context tokens; the model supports {limit}. Start a new chat or use a model with a larger context.")); }
+    Ok(needed.max(minimum.min(limit)).next_power_of_two().min(limit))
 }
 
 pub async fn send<F: Fn(ChatProgress) + Send + Sync>(
@@ -284,15 +299,16 @@ async fn run_turn<F: Fn(ChatProgress) + Send + Sync>(
         body["keep_alive"]=json!(settings.model_keep_alive);
         if let Some(agent) = settings.active_agent() {
             body["options"]["temperature"] = json!(agent["temperature"].as_f64().unwrap_or(0.7).clamp(0.0, 2.0));
-            body["options"]["num_ctx"] = json!(agent["contextSize"].as_u64().unwrap_or(4096).clamp(512, 131072));
         }
+        let minimum = settings.active_agent().and_then(|agent| agent["contextSize"].as_u64()).unwrap_or(4096);
+        body["options"]["num_ctx"] = json!(context_window(&messages, &tools, minimum, info.context_size)?);
         if !tools.is_empty() {
             body["tools"] = json!(tools);
         }
         if info.thinking {
             body["think"] = json!(false);
         }
-        let assistant = stream_reply(&settings.ollama_url, body, request_id, emit).await?;
+        let assistant = stream_reply(&settings.ollama_url, body, info.context_size, request_id, emit).await?;
         let calls =
             assistant.get("tool_calls").and_then(Value::as_array).cloned().unwrap_or_default();
         let text =
@@ -399,18 +415,29 @@ impl StreamReply {
 
 async fn stream_reply<F: Fn(ChatProgress) + Send + Sync>(
     url: &str,
-    body: Value,
+    mut body: Value,
+    context_limit: u64,
     id: &str,
     emit: &F,
 ) -> Result<Value, String> {
-    let mut response =
-        client(600)?.post(endpoint(url, "chat")?).json(&body).send().await.map_err(|e| {
+    let mut retried = false;
+    let mut response = loop {
+        let response = client(600)?.post(endpoint(url, "chat")?).json(&body).send().await.map_err(|e| {
             format!("Cannot reach Ollama. Check the server URL and that Ollama is running: {e}")
         })?;
-    if !response.status().is_success() {
-        response_json(response).await?;
-        return Err("Ollama request failed.".into());
-    }
+        if response.status().is_success() { break response; }
+        let status = response.status();
+        let error: Value = response.json().await.map_err(|e| e.to_string())?;
+        let prompt = error["error"]["n_prompt_tokens"].as_u64().or_else(|| error["n_prompt_tokens"].as_u64());
+        if let Some(tokens) = prompt {
+            let needed = (tokens + 2048).next_power_of_two().min(context_limit);
+            if !retried && needed > body["options"]["num_ctx"].as_u64().unwrap_or(0) && needed > tokens {
+                body["options"]["num_ctx"] = json!(needed); retried = true; continue;
+            }
+        }
+        let detail = error["error"].as_str().or_else(|| error["error"]["message"].as_str()).unwrap_or("Request failed");
+        return Err(format!("Ollama {status}: {detail}"));
+    };
     let mut reply = StreamReply::default();
     let mut buffer = Vec::new();
     loop {
@@ -648,6 +675,15 @@ pub(crate) fn base64_for(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn context_grows_for_tool_catalog_and_respects_model_limit() {
+        let messages=vec![serde_json::json!({"role":"user","content":"hi"})];
+        let tools=vec![serde_json::json!({"description":"x".repeat(18000)})];
+        assert!(super::context_window(&messages,&tools,4096,32768).unwrap()>4096);
+        let larger=vec![serde_json::json!({"role":"tool","content":"x".repeat(40000)})];
+        assert!(super::context_window(&larger,&tools,4096,65536).unwrap()>super::context_window(&messages,&tools,4096,65536).unwrap());
+        assert!(super::context_window(&larger,&tools,4096,4096).is_err());
+    }
     #[test]
     fn restoring_chats_replaces_context_and_rejects_instruction_roles() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
