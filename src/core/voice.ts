@@ -68,7 +68,14 @@ class LocalVoice {
     await this.audioContext();
     if (epoch !== this.epoch) throw new Error("Voice stopped");
     await this.request("speak", progress, { text });
-    while (this.playback.length) await new Promise(resolve => window.setTimeout(resolve, 80));
+    const deadline = performance.now() + Math.max(0, this.playbackEnd - this.context!.currentTime) * 1000 + 10000;
+    try {
+      while (this.playback.length) {
+        if (performance.now() > deadline) throw new Error("Audio playback stopped responding. Check your output device and try again.");
+        if (this.context!.state === "suspended") await this.audioContext();
+        await new Promise(resolve => window.setTimeout(resolve, 80));
+      }
+    } catch (error) { this.stopSpeaking(); throw error; }
     return "";
   }
 

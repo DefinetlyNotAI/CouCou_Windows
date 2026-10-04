@@ -46,3 +46,16 @@ test("cancelled microphone requests stop tracks granted after cancellation", asy
   await assert.rejects(recording, /Voice stopped/);
   assert.equal(stopped, true);
 });
+
+test("stalled output releases playback instead of leaving voice busy forever", async t => {
+  let clock = 0, stopped = false;
+  const previousContext = Voice.context;
+  t.after(() => { Voice.context = previousContext; });
+  t.mock.method(performance, "now", () => clock += 11000);
+  t.mock.method(Voice, "audioContext", async () => { Voice.context = { currentTime: 0, state: "running" }; return Voice.context; });
+  t.mock.method(Voice, "request", async () => "");
+  Voice.playback = [{ stop: () => { stopped = true; } }];
+  await assert.rejects(Voice.speak("Hello", () => {}), /Audio playback stopped responding/);
+  assert.equal(stopped, true);
+  assert.equal(Voice.playback.length, 0);
+});
