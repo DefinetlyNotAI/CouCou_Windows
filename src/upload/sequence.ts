@@ -265,8 +265,10 @@ class UploadSequence {
     this.cursorY = y;
   }
 
-  /** The island stays open per the spec, so leaving the zone changes nothing. */
-  exitZone() {}
+  /** Leaving before a drop cancels the preview, not an upload in progress. */
+  exitZone() {
+    if (!this.dropped) this.deactivate();
+  }
 
   performDrop(uploadDuration: number) {
     this.uploadDuration = uploadDuration;

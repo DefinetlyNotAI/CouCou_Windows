@@ -82,6 +82,7 @@ export class Island {
   // Bot hover → love (IslandWindowController.botHoverIn)
   private botHovering = false;
   private botHoverTimer: number | null = null;
+  private dragReturn: { view: IslandViewName; mode: IslandMode } | null = null;
 
   private confusedRecovery: number | null = null;
   private prevViewBeforeConfused: IslandViewName = "overview";
@@ -357,9 +358,10 @@ export class Island {
       case "over": {
         this.fileDragging = true;
         if (!inside) {
-          if(State.fileDragOver) {State.fileDragOver=false;this.engine.animateMorph(0);UploadSeq.exitZone();State.notify();}
+          this.cancelDragHover();
           return;
         }
+        if (!State.fileDragOver) this.dragReturn = { view: State.view, mode: State.mode };
         this.onCursor(point.x,point.y);
         if (State.fileDragOver) return;
         State.fileDragOver = true;
@@ -372,24 +374,19 @@ export class Island {
       }
       case "leave": {
         this.fileDragging = false;
-        if (!State.fileDragOver) return;
-        State.fileDragOver = false;
-        this.engine.animateMorph(0);
-        // The island deliberately stays open: the drag session is still alive.
-        UploadSeq.exitZone();
-        State.notify();
+        this.cancelDragHover();
         break;
       }
       case "drop": {
         this.fileDragging = false;
-        State.fileDragOver = false;
-        if(!inside) {UploadSeq.deactivate();this.engine.animateMorph(0);if(State.view==="upload")this.setView(State.defaultView());return;}
+        if(!inside) {this.cancelDragHover();return;}
         const path = e.paths?.[0];
         if (!path) {
-          this.engine.animateMorph(0);
-          this.setView(State.defaultView());
+          this.cancelDragHover();
           return;
         }
+        State.fileDragOver = false;
+        this.dragReturn = null;
         this.swallow(path);
         break;
       }
@@ -624,6 +621,21 @@ export class Island {
 
     // Bot hover → love
     this.updateBotHover();
+    this.ensureRunning();
+  }
+
+  private cancelDragHover() {
+    if (!State.fileDragOver && !this.dragReturn) return;
+    State.fileDragOver = false;
+    this.engine.animateMorph(0);
+    UploadSeq.exitZone();
+    const previous = this.dragReturn;
+    this.dragReturn = null;
+    if (State.view === "upload") {
+      this.setView(previous && !UPLOAD_VIEWS.has(previous.view) ? previous.view : State.defaultView());
+      if (previous?.mode !== "expanded" && !State.fullscreen) this.fsm.forcePetit();
+    }
+    State.notify();
     this.ensureRunning();
   }
 
