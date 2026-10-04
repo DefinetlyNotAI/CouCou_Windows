@@ -94,6 +94,48 @@ mod tests {
     use super::*;
 
     #[test]
+    fn http_transport_initializes_lists_and_calls_tools() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            use tokio::io::{AsyncBufReadExt, BufReader};
+            use std::os::windows::process::CommandExt;
+            let script = r#"
+const http=require('node:http');
+const server=http.createServer(async (req,res)=>{
+  if(req.method!=='POST'){res.writeHead(405).end();return;}
+  let text='';for await(const chunk of req)text+=chunk;
+  const request=JSON.parse(text);
+  if(request.id===undefined){res.writeHead(202).end();return;}
+  let result;
+  if(request.method==='initialize')result={protocolVersion:request.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'coucou-http-test',version:'1'}};
+  else if(request.method==='tools/list')result={tools:[{name:'echo',description:'Echo input',inputSchema:{type:'object',properties:{value:{type:'string'}},required:['value']}}]};
+  else if(request.method==='tools/call')result={content:[{type:'text',text:request.params.arguments.value}],isError:false};
+  else {res.writeHead(400).end();return;}
+  res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({jsonrpc:'2.0',id:request.id,result}));
+});
+server.listen(0,'127.0.0.1',()=>console.log('http://127.0.0.1:'+server.address().port+'/mcp'));
+"#;
+            let mut command=tokio::process::Command::new("node");
+            command.args(["-e",script]).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
+            command.as_std_mut().creation_flags(0x08000000);
+            let mut child=command.spawn().unwrap();
+            let mut lines=BufReader::new(child.stdout.take().unwrap()).lines();
+            let url=tokio::time::timeout(std::time::Duration::from_secs(10),lines.next_line()).await.unwrap().unwrap().unwrap();
+            let server=Server {id:"http-test".into(),name:"HTTP fixture".into(),command:String::new(),url,args:vec![],env:HashMap::new(),enabled:true,permissions:"ask".into()};
+            let client=create_client(&server).await.unwrap();
+            let tools=available_tools(&client).await.unwrap();
+            assert_eq!(tools.len(),1);
+            assert_eq!(tools[0].name,"echo");
+            let params=serde_json::from_value(json!({"name":"echo","arguments":{"value":"hello over HTTP"}})).unwrap();
+            let response=tokio::time::timeout(std::time::Duration::from_secs(10),client.call_tool(params)).await.unwrap().unwrap();
+            let response=serde_json::to_value(response).unwrap();
+            client.cancel().await.unwrap();
+            child.kill().await.unwrap();
+            assert_eq!(response["content"][0]["text"],"hello over HTTP");
+            assert_eq!(response["isError"],false);
+        });
+    }
+
+    #[test]
     fn stdio_transport_initializes_lists_and_calls_tools() {
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             let script = r#"
