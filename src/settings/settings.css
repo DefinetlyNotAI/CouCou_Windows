@@ -33,13 +33,27 @@ body.settings-window {
 }
 
 #settings-root {
-  padding: 22px 24px 32px;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  max-width: 720px;
+  display: grid;
+  grid-template-columns: 176px minmax(0, 1fr);
+  height: 100vh;
+  max-width: 1120px;
   margin: 0 auto;
 }
+
+.settings-sidebar { display: flex; flex-direction: column; padding: 28px 14px 20px; background: #101114; border-right: 1px solid var(--hairline); }
+.settings-brand { display: flex; flex-direction: column; gap: 4px; padding: 0 12px 26px; }
+.settings-brand span:first-child { font-size: 19px; font-weight: 650; letter-spacing: -.5px; }
+.settings-brand span:last-child,.settings-sidebar > .version { font-size: 11px; color: var(--dim); }
+.settings-sidebar > .version { margin-top: auto; padding: 20px 12px 0; }
+.settings-nav { display: flex; flex-direction: column; gap: 3px; }
+.settings-nav button { border-radius: 5px; text-align: left; padding: 10px 12px; background: transparent; color: var(--dim); }
+.settings-nav button[aria-current="page"] { background: #1c2621; color: #93e5b1; }
+.settings-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.settings-header { padding: 28px 28px 20px; border-bottom: 1px solid var(--hairline); }
+.settings-content { overflow: auto; padding: 24px 28px 40px; min-height: 0; }
+.settings-page { display: flex; flex-direction: column; gap: 28px; }
+.settings-page[hidden] { display: none; }
+.settings-main > .notice { margin: 12px 28px 0; }
 
 h1 {
   font: 600 17px var(--font);
@@ -53,17 +67,17 @@ h1 .version {
 }
 
 section {
-  background: var(--card);
-  border: 1px solid var(--hairline);
-  border-radius: 14px;
-  padding: 16px 18px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
 section > h2 {
-  font: 600 13px var(--font);
+  font: 600 14px var(--font);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -102,12 +116,12 @@ section > h2 {
 button {
   font: 500 12.5px var(--font);
   padding: 7px 14px;
-  border: 0;
-  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  border-radius: 5px;
   background: rgba(255, 255, 255, 0.09);
   color: var(--ink);
   cursor: pointer;
-  transition: background 0.14s, transform 0.08s;
+  transition: background 0.14s;
 }
 
 button:hover:not(:disabled) {
@@ -115,7 +129,7 @@ button:hover:not(:disabled) {
 }
 
 button:active:not(:disabled) {
-  transform: scale(0.96);
+  background: rgba(255, 255, 255, 0.2);
 }
 
 button.primary {
@@ -192,6 +206,7 @@ input[type="range"]::-webkit-slider-thumb {
   background: #fff;
 }
 
+input:not([type]),
 input[type="number"],
 input[type="text"],
 input[type="password"],
@@ -200,9 +215,24 @@ textarea {
   font: 400 12.5px var(--font);
   background: rgba(255, 255, 255, 0.07);
   border: 1px solid var(--hairline);
-  border-radius: 8px;
+  border-radius: 5px;
   color: var(--ink);
-  padding: 5px 8px;
+  padding: 8px 10px;
+}
+
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible { outline: 2px solid #93e5b1; outline-offset: 2px; }
+.row { min-height: 36px; }
+.settings-page section + section { border-top: 1px solid var(--hairline); padding-top: 24px; }
+.settings-page .row > input[type="text"],.settings-page .row > input[type="password"] { min-width: 0; }
+@media (max-width: 600px) {
+  #settings-root { grid-template-columns: 136px minmax(0, 1fr); }
+  .settings-sidebar { padding: 22px 8px 16px; }
+  .settings-brand { padding-left: 8px; }
+  .settings-nav button { padding: 9px 8px; font-size: 12px; }
+  .settings-header { padding: 22px 18px 16px; }
+  .settings-content { padding: 20px 18px 28px; }
+  .row > label { min-width: 100%; }
+  :root .agent-editor { grid-template-columns: minmax(0, 1fr); }
 }
 
 textarea {
@@ -241,3 +271,8 @@ select option {
 .agent-field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; min-width: 0; }
 .agent-field:has(textarea) { grid-column: 1 / -1; }
 .agent-field textarea { min-height: 70px; resize: vertical; }
+.settings-nav button { border: 0; }
+.row > input:not([type]) { flex: 1; min-width: 120px; }
+.row > label { flex: 0 0 132px; }
+@media (max-width: 600px) { :root .agent-editor { grid-template-columns: minmax(0, 1fr); } }
+input:focus-visible,select:focus-visible,textarea:focus-visible { outline: 2px solid #93e5b1; outline-offset: 2px; }

@@ -570,20 +570,41 @@ async function main() {
 
   const [provider, providerDetails] = providerSettings();
   clear(root);
+  const pages: [string, HTMLElement[]][] = [
+    ["Connection", [provider, providerDetails, chatOptionsSection(keyPresent, keyCheckError)]],
+    ["Models", [modelsSection(settings, save)]],
+    ["Agents", [agentsSection(settings, save)]],
+    ["Projects", [projectsSection(settings, save)]],
+    ["Tools & MCP", [permissionsSection(), mcpSection(settings, save)]],
+    ["Integrations", [integrationsSection(present)]],
+    ["Appearance", [generalSection()]],
+    ["Profiles", [preferenceProfiles(settings, save)]],
+  ];
+  const navigation = h("nav", { class: "settings-nav", "aria-label": "Settings categories" });
+  const content = h("main", { class: "settings-content" });
+  const heading = h("h1", { text: "Connection", tabindex: "-1" });
+  const panels = pages.map(([name, sections], index) => {
+    const panel = h("div", { class: "settings-page", id: `settings-page-${index}`, "aria-label": name }, ...sections);
+    panel.hidden = index !== 0;
+    content.append(panel);
+    return panel;
+  });
+  const buttons = pages.map(([name], index) => {
+    const button = h("button", { text: name, "aria-controls": panels[index].id, "aria-current": index === 0 ? "page" : "false" }) as HTMLButtonElement;
+    button.addEventListener("click", () => {
+      panels.forEach((panel, page) => { panel.hidden = page !== index; });
+      buttons.forEach((item, page) => item.setAttribute("aria-current", page === index ? "page" : "false"));
+      heading.textContent = name;
+      content.scrollTop = 0;
+    });
+    navigation.append(button);
+    return button;
+  });
   root.append(
-    h("h1", {}, h("span", { text: "CouCou Shahm Edition" }), h("span", { class: "version", text: version })),
-    saveError,
-    provider,
-    providerDetails,
-    chatOptionsSection(keyPresent, keyCheckError),
-    agentsSection(settings, save),
-    permissionsSection(),
-    mcpSection(settings,save),
-    projectsSection(settings,save),
-    modelsSection(settings,save),
-    preferenceProfiles(settings,save),
-    integrationsSection(present),
-    generalSection(),
+    h("aside", { class: "settings-sidebar" },
+      h("div", { class: "settings-brand" }, h("span", { text: "CouCou" }), h("span", { text: "Shahm Edition" })),
+      navigation, h("span", { class: "version", text: version })),
+    h("div", { class: "settings-main" }, h("header", { class: "settings-header" }, heading), saveError, content),
   );
 
   void onEvent<Settings>("settings-changed", (next) => {

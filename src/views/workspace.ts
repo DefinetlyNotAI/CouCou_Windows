@@ -19,7 +19,27 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
   const runStatus=h("div",{class:"workspace-run"});
   const runView=buildRuns(pause,stop,async()=> {try {const result=await tool("git.diff",{cwd:cwd()});output.textContent=String(result.stdout||"");}catch {}});
   const left=h("aside",{class:"workspace-pane workspace-left"},h("h3",{text:"Project"}),h("div",{class:"workspace-project-picker"}),h("h3",{text:"Files"}),fileTree);
-  const right=h("aside",{class:"workspace-pane workspace-right"},h("h3",{text:"Context and tools"}));
+  const right=h("aside",{class:"workspace-pane workspace-right"});
+  const contextPanel=h("div",{});
+  const activityPanel=h("div",{});
+  function tabs(items:[string,HTMLElement][],label:string) {
+    const nav=h("div",{class:"workspace-tabs",role:"tablist","aria-label":label});
+    const body=h("div",{class:"workspace-tab-body"});
+    const buttons:HTMLButtonElement[]=[];
+    items.forEach(([title,panel],index)=> {
+      const id=`workspace-${label.toLowerCase()}-${index}`;
+      panel.id=id;panel.classList.add("workspace-tab-panel");panel.setAttribute("role","tabpanel");panel.hidden=index!==0;
+      const button=h("button",{text:title,role:"tab","aria-controls":id,"aria-selected":String(index===0),onclick:()=> {
+        items.forEach(([,target],position)=> {target.hidden=position!==index;buttons[position].setAttribute("aria-selected",String(position===index));});
+      }}) as HTMLButtonElement;
+      button.addEventListener("keydown",event=> {
+        if(event.key!=="ArrowLeft" && event.key!=="ArrowRight")return;
+        event.preventDefault();const next=(index+(event.key==="ArrowRight"?1:-1)+items.length)%items.length;buttons[next].click();buttons[next].focus();
+      });
+      buttons.push(button);nav.append(button);body.append(panel);
+    });
+    return h("div",{class:"workspace-tab-group"},nav,body);
+  }
   const script=h("textarea",{"aria-label":"PowerShell command",placeholder:"Enter a PowerShell command",spellcheck:"false"}) as HTMLTextAreaElement;
   const search=h("input",{"aria-label":"Search project",placeholder:"Search project semantically"}) as HTMLInputElement;
   let busy=false;let selectedFile="";let savedText="";let activeProject="";let directory="";let previousDirectories:string[]=[];let fullscreen=false;
@@ -53,7 +73,7 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
   async function openFile(path:string,line=1) {
     if(busy)return;
     if(selectedFile && editor.value!==savedText && !window.confirm("Discard unsaved file changes?"))return;
-    try {const result=await tool("filesystem.read",{path});selectedFile=path;editor.value=String(result.content ?? "");savedText=editor.value;fileLabel.textContent=path;editor.readOnly=false;sync();const offset=editor.value.split("\n").slice(0,Math.max(0,line-1)).join("\n").length;editor.focus();editor.setSelectionRange(offset,offset);editor.scrollTop=Math.max(0,line-1)*18;}
+    try {const result=await tool("filesystem.read",{path});selectedFile=path;editor.value=String(result.content ?? "");savedText=editor.value;fileLabel.textContent=path;editor.readOnly=false;sync();footer.querySelector<HTMLButtonElement>('[aria-controls="workspace-console-0"]')?.click();const offset=editor.value.split("\n").slice(0,Math.max(0,line-1)).join("\n").length;editor.focus();editor.setSelectionRange(offset,offset);editor.scrollTop=Math.max(0,line-1)*18;}
     catch { /* Keep the previously opened file. */ }
   }
   const save=h("button",{text:"Save file",onclick:async()=> {
@@ -66,7 +86,10 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
   }}) as HTMLButtonElement;
   const parent=h("button",{text:"↑",title:"Parent directory",onclick:()=> {if(busy)return;const previous=previousDirectories.pop();if(previous)void list(previous);}}) as HTMLButtonElement;
   left.append(h("div",{class:"workspace-controls"},parent,refresh));
-  const terminalControls=h("div",{class:"workspace-controls"});
+  const terminalActions=h("div",{class:"workspace-controls"});
+  const gitActions=h("div",{class:"workspace-controls"});
+  const searchActions=h("div",{class:"workspace-controls"});
+  const checkActions=h("div",{class:"workspace-controls"});
   const gitFiles=h("textarea",{"aria-label":"Git file paths",placeholder:"Git file paths, one per line"}) as HTMLTextAreaElement;
   const commitMessage=h("input",{"aria-label":"Commit message",placeholder:"Commit message"}) as HTMLInputElement;
   const branchName=h("input",{"aria-label":"Branch name",placeholder:"Branch name"}) as HTMLInputElement;
@@ -76,7 +99,7 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
       const references=(Array.isArray(result.results) ? result.results : name==="git.conflicts" ? String(result.stdout||"").split(/\r?\n/).filter(Boolean).map(file=>({file:`${cwd()}\\${file}`,line:1})) : []) as {file:string;line?:number;startLine?:number}[];
       outputFiles.replaceChildren(...references.map(reference=>h("button",{class:"workspace-file",text:`${reference.file}:${reference.line || reference.startLine || 1}`,onclick:()=>void openFile(reference.file,reference.line || reference.startLine || 1)})));
     }catch {}}}) as HTMLButtonElement;
-    terminalControls.append(button);return button;
+    (name.startsWith("git.")?gitActions:name.startsWith("coding.")?checkActions:name.endsWith("search")?searchActions:terminalActions).append(button);return button;
   }
   const cwd=()=>State.settings.projects.find(project=>project.id===State.chatProjectId)?.gitRepo || State.settings.projects.find(project=>project.id===State.chatProjectId)?.folder || "";
   action("Run","powershell.run",()=>({script:script.value,cwd:cwd()}));
@@ -92,9 +115,17 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
   action("Tests","coding.test",()=>({...(script.value.trim()?{script:script.value}:{}),cwd:cwd()}));
   action("Lint","coding.lint",()=>({...(script.value.trim()?{script:script.value}:{}),cwd:cwd()}));
   action("Build","coding.build",()=>({...(script.value.trim()?{script:script.value}:{}),cwd:cwd()}));
-  const footer=h("section",{class:"workspace-pane workspace-bottom"},h("div",{class:"workspace-editor-header"},fileLabel,save),editor,
-    h("h3",{text:"Terminal / Git / search / test logs"}),h("div",{class:"workspace-command-row"},script,search),h("details",{},h("summary",{text:"Git actions"}),h("div",{class:"workspace-command-row"},gitFiles,commitMessage,branchName)),terminalControls,notice,outputFiles,output);
-  right.append(runView.el,runStatus,buildServices(tool),buildBackground(),buildStats(),buildLibrary());
+  const footer=h("section",{class:"workspace-pane workspace-bottom"},tabs([
+    ["Editor",h("div",{class:"workspace-editor-panel"},h("div",{class:"workspace-editor-header"},fileLabel,save),editor)],
+    ["Terminal",h("div",{},script,terminalActions)],
+    ["Git",h("div",{},h("div",{class:"workspace-command-row"},gitFiles,commitMessage,branchName),gitActions)],
+    ["Search",h("div",{},search,searchActions)],
+    ["Checks",h("div",{},checkActions)],
+  ],"Console"),notice,outputFiles,output);
+  right.append(tabs([
+    ["Context",contextPanel],["Tools",activityPanel],["Run",h("div",{},runView.el,runStatus)],
+    ["Services",buildServices(tool)],["Tasks",buildBackground()],["Stats",buildStats()],["Chats",buildLibrary()],
+  ],"Inspector"));
   root.prepend(left);root.append(right,footer);
   function sync() {
     runView.sync();
@@ -103,13 +134,13 @@ export function buildWorkspace(root:HTMLElement,context:HTMLElement,activity:HTM
     root.classList.toggle("full-workspace",enabled);
     if(fullscreen!==enabled) {
       fullscreen=enabled;
-      if(enabled) {right.prepend(context,activity);left.querySelector(".workspace-project-picker")!.append(projectPicker);}
+      if(enabled) {contextPanel.append(context);activityPanel.append(activity);left.querySelector(".workspace-project-picker")!.append(projectPicker);}
       else {contextAnchor.after(context);activityAnchor.after(activity);pickerAnchor.after(projectPicker);}
     }
     const project=State.settings.projects.find(project=>project.id===State.chatProjectId);
     if(activeProject!==(project?.id||"")) {activeProject=project?.id||"";directory="";previousDirectories=[];selectedFile="";editor.value="";savedText="";fileLabel.textContent="No file open";fileTree.replaceChildren();}
     save.disabled=!IS_TAURI || busy || !selectedFile;refresh.disabled=!IS_TAURI || busy || !project;parent.disabled=busy || !previousDirectories.length;
-    for(const button of terminalControls.querySelectorAll<HTMLButtonElement>("button"))button.disabled=!IS_TAURI || busy || !project;
+    for(const group of [terminalActions,gitActions,searchActions,checkActions])for(const button of group.querySelectorAll<HTMLButtonElement>("button"))button.disabled=!IS_TAURI || busy || !project;
     editor.disabled=busy || !selectedFile;script.disabled=search.disabled=busy || !project;
     const task=State.tasks.find(task=>task.id==="integration_ollama");
     runStatus.replaceChildren(h("h3",{text:"Agent progress"}),h("div",{text:State.chatBusy ? State.chatStatus : task?.state || "Idle"}),...State.toolActivity.slice(-8).map(step=>h("div",{text:step.text})));
