@@ -34,20 +34,27 @@ async fn connect(app: &AppHandle, server: &Server, chat_id: &str, project_id: &s
     let mut sessions = sessions().lock().await;
     if let Some((config,client)) = sessions.get(&server.id) { if config == &fingerprint && !client.is_closed() { return Ok(client.clone()); } }
     sessions.remove(&server.id);
-    let client = if server.url.is_empty() {
+    let client = Arc::new(create_client(server).await?); sessions.insert(server.id.clone(),(fingerprint,client.clone())); Ok(client)
+}
+
+async fn create_client(server: &Server) -> Result<Client,String> {
+    if server.url.is_empty() {
         use std::os::windows::process::CommandExt;
         let mut command = tokio::process::Command::new(&server.command);
         command.args(&server.args).envs(&server.env).kill_on_drop(true);
         command.as_std_mut().creation_flags(0x08000000);
         let transport = TokioChildProcess::new(command).map_err(|error| error.to_string())?;
-        tokio::time::timeout(std::time::Duration::from_secs(30),().serve(transport)).await.map_err(|_| "MCP initialization timed out")?.map_err(|error| error.to_string())?
+        tokio::time::timeout(std::time::Duration::from_secs(30),().serve(transport)).await.map_err(|_| "MCP initialization timed out")?.map_err(|error| error.to_string())
     } else {
         let url = reqwest::Url::parse(&server.url).map_err(|error| error.to_string())?;
         if !matches!(url.scheme(),"http"|"https") { return Err("MCP URL must use HTTP".into()); }
         let transport = StreamableHttpClientTransport::from_uri(server.url.clone());
-        tokio::time::timeout(std::time::Duration::from_secs(30),().serve(transport)).await.map_err(|_| "MCP initialization timed out")?.map_err(|error| error.to_string())?
-    };
-    let client = Arc::new(client); sessions.insert(server.id.clone(),(fingerprint,client.clone())); Ok(client)
+        tokio::time::timeout(std::time::Duration::from_secs(30),().serve(transport)).await.map_err(|_| "MCP initialization timed out")?.map_err(|error| error.to_string())
+    }
+}
+
+async fn available_tools(client: &Client) -> Result<Vec<rmcp::model::Tool>,String> {
+    tokio::time::timeout(std::time::Duration::from_secs(30),client.peer().list_all_tools()).await.map_err(|_| "MCP tools/list timed out")?.map_err(|error| error.to_string())
 }
 
 pub async fn schemas(app: &AppHandle, settings: &crate::settings::Settings, chat_id: &str, project_id: &str) -> Result<Vec<Value>,String> {
@@ -58,7 +65,7 @@ pub async fn schemas(app: &AppHandle, settings: &crate::settings::Settings, chat
         if !server.enabled || server.permissions == "deny" || allowed.is_some_and(|ids| !ids.is_empty() && !ids.iter().any(|id| id.as_str() == Some(&server.id))) { continue; }
         if project_servers.is_some_and(|ids| !ids.is_empty() && !ids.iter().any(|id| id.as_str()==Some(&server.id))) { continue; }
         let client = connect(app,server,chat_id,project_id).await?;
-        let list = tokio::time::timeout(std::time::Duration::from_secs(30),client.peer().list_all_tools()).await.map_err(|_| "MCP tools/list timed out")?.map_err(|error| error.to_string())?;
+        let list = available_tools(&client).await?;
         for tool in list {
             tools.push(json!({"type":"function","function":{"name":format!("mcp.{}.{}",server.id,tool.name),"description":format!("{}: {}",server.name,tool.description.as_deref().unwrap_or("MCP tool")),"parameters":tool.input_schema}}));
         }
@@ -75,9 +82,48 @@ pub async fn call(app: &AppHandle, request: &crate::tools::ToolRequest) -> Resul
     if settings.projects.iter().find(|project|project["id"].as_str()==Some(request.project_id.as_str())).and_then(|project|project["mcpServers"].as_array()).is_some_and(|ids|!ids.is_empty()&&!ids.iter().any(|id|id.as_str()==Some(server_id))) { return Err("MCP server disabled for this project".into()); }
     let server = settings.mcp_servers.iter().find(|server| server.id == server_id).ok_or("Unknown MCP server")?;
     let client = connect(app,server,&request.chat_id,&request.project_id).await?;
-    let available = client.peer().list_all_tools().await.map_err(|error| error.to_string())?;
+    let available = available_tools(&client).await?;
     if !available.iter().any(|candidate| candidate.name == tool) { return Err("Unknown MCP tool".into()); }
     let params = serde_json::from_value(json!({"name":tool,"arguments":request.input})).map_err(|error| error.to_string())?;
     let result = tokio::time::timeout(std::time::Duration::from_secs(120),client.call_tool(params)).await.map_err(|_| "MCP tool timed out")?.map_err(|error| error.to_string())?;
     serde_json::to_value(result).map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stdio_transport_initializes_lists_and_calls_tools() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let script = r#"
+const lines = require('node:readline').createInterface({input:process.stdin});
+let listed = false;
+lines.on('line', line => {
+  const request = JSON.parse(line);
+  if (request.id === undefined) return;
+  let result;
+  if (request.method === 'initialize') result = {protocolVersion:request.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'coucou-test',version:'1'}};
+  else if (request.method === 'tools/list') {if(listed)return;listed=true;result = {tools:[{name:'echo',description:'Echo input',inputSchema:{type:'object',properties:{value:{type:'string'}},required:['value']}}]};}
+  else if (request.method === 'tools/call') result = {content:[{type:'text',text:request.params.arguments.value+':'+process.env.COUCOU_MCP_TEST}],isError:false};
+  else {process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,error:{code:-32601,message:'Unknown method'}})+'\n');return;}
+  process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\n');
+});
+"#;
+            let server = Server { id:"stdio-test".into(),name:"Local fixture".into(),command:"node".into(),url:String::new(),args:vec!["-e".into(),script.into()],env:HashMap::from([("COUCOU_MCP_TEST".into(),"fixture".into())]),enabled:true,permissions:"ask".into() };
+            let client = create_client(&server).await.unwrap();
+            let tools = available_tools(&client).await.unwrap();
+            assert_eq!(tools.len(),1);
+            assert_eq!(tools[0].name,"echo");
+            assert_eq!(tools[0].input_schema["required"],json!(["value"]));
+            let params = serde_json::from_value(json!({"name":"echo","arguments":{"value":"hello"}})).unwrap();
+            let response = tokio::time::timeout(std::time::Duration::from_secs(10),client.call_tool(params)).await.unwrap().unwrap();
+            let response = serde_json::to_value(response).unwrap();
+            let stalled = tokio::time::timeout(std::time::Duration::from_secs(35),available_tools(&client)).await.unwrap();
+            client.cancel().await.unwrap();
+            assert_eq!(stalled.unwrap_err(),"MCP tools/list timed out");
+            assert_eq!(response["content"][0]["text"],"hello:fixture");
+            assert_eq!(response["isError"],false);
+        });
+    }
 }
