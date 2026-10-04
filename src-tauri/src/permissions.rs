@@ -25,7 +25,8 @@ pub async fn authorize<R: tauri::Runtime>(app: &AppHandle<R>, request: &ToolRequ
     }
     let script = request.input["script"].as_str().unwrap_or("").to_lowercase();
     let program = request.input["program"].as_str().unwrap_or("").to_lowercase();
-    let category = if base_category == "run" && (request.input["admin"].as_bool() == Some(true) || script.contains("runas") || program.ends_with("runas.exe") || program == "runas") { "admin" } else { base_category };
+    let elevated_arguments = request.input["args"].as_array().is_some_and(|args|args.iter().filter_map(Value::as_str).any(|argument|argument.to_lowercase().contains("runas")));
+    let category = if base_category == "run" && (request.input["admin"].as_bool() == Some(true) || script.contains("runas") || elevated_arguments || program.ends_with("runas.exe") || program == "runas") { "admin" } else { base_category };
     let shared = app.state::<Shared>();
     let settings = shared.settings.lock().unwrap().for_project(&request.project_id);
     let project=settings.projects.iter().find(|project| project["id"].as_str()==Some(request.project_id.as_str()));
@@ -80,6 +81,21 @@ mod tests {
     use tauri::Listener;
 
     #[test]
+    fn elevation_in_executable_arguments_cannot_use_a_regular_run_grant() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let app=tauri::test::mock_app();
+            let mut settings=crate::settings::Settings::default();
+            settings.tool_permissions.insert("run:terminal.run".into(),"allow".into());
+            settings.tool_permissions.insert("admin:terminal.run".into(),"deny".into());
+            app.manage(Shared {settings:Mutex::new(settings),gate:Arc::new(crate::island::PollGate::new())});
+            let mut request=ToolRequest {name:"terminal.run".into(),input:json!({"program":"powershell.exe","args":["-Command","Start-Process notepad.exe -Verb RunAs"]}),chat_id:"elevation-args-test".into(),project_id:String::new()};
+            assert_eq!(authorize(app.handle(),&request).await.unwrap_err(),"Tool denied by permission settings");
+            request.input["args"]=json!(["-Command","Get-Location"]);
+            authorize(app.handle(),&request).await.unwrap();
+        });
+    }
+
+    #[test]
     fn project_tools_reject_a_target_outside_the_approval_scope() {
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             let app = tauri::test::mock_app();
@@ -106,6 +122,7 @@ mod tests {
             let observed = count.clone();
             app.listen_any("tool-permission", move |event| {
                 let payload: Value = serde_json::from_str(event.payload()).unwrap();
+                if payload["request"]["input"]["path"] != "C:\\permission-check.txt" { return; }
                 assert_eq!(payload["category"], "read");
                 assert_eq!(payload["request"]["input"]["path"], "C:\\permission-check.txt");
                 observed.fetch_add(1, Ordering::SeqCst);
@@ -142,6 +159,7 @@ mod tests {
             let observed = ids.clone();
             let listener = app.listen_any("tool-permission", move |event| {
                 let payload: Value = serde_json::from_str(event.payload()).unwrap();
+                if payload["request"]["chatId"] != "permission-test-cancel" { return; }
                 observed.lock().unwrap().push(payload["id"].as_str().unwrap().into());
             });
             let request = ToolRequest { name: "filesystem.read".into(), input: json!({"path":"C:\\cancel-check.txt"}), chat_id: "permission-test-cancel".into(), project_id: String::new() };
@@ -153,6 +171,7 @@ mod tests {
             let observed = count.clone();
             app.listen_any("tool-permission", move |event| {
                 let payload: Value = serde_json::from_str(event.payload()).unwrap();
+                if payload["request"]["chatId"] != "permission-test-cancel" { return; }
                 observed.fetch_add(1, Ordering::SeqCst);
                 decide(payload["id"].as_str().unwrap().into(), "once".into()).unwrap();
             });
