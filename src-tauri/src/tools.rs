@@ -99,6 +99,12 @@ pub(crate) async fn ps(script: &str, input: &Value, cwd: Option<&str>) -> Result
     command(&powershell(), &["-NoLogo".into(),"-NoProfile".into(),"-NonInteractive".into(),"-STA".into(),"-Command".into(),script.into()], cwd, Some(&input.to_string())).await
 }
 
+async fn write_file(input: &Value) -> Result<Value, String> {
+    let content = input["content"].as_str().ok_or("Content must be a string")?;
+    tokio::fs::write(path(input)?, content).await.map_err(|error| error.to_string())?;
+    Ok(json!({"written":true}))
+}
+
 pub async fn execute(app: &AppHandle, request: &ToolRequest) -> Result<Value, String> {
     let normalized=crate::services::normalize(request)?;
     let request=normalized.as_ref().unwrap_or(request);
@@ -144,7 +150,7 @@ pub async fn execute(app: &AppHandle, request: &ToolRequest) -> Result<Value, St
             crate::web::run(&settings,&request.name,input).await
         },
         "filesystem.read" => Ok(json!({"content":tokio::fs::read_to_string(path(input)?).await.map_err(|error| error.to_string())?})),
-        "filesystem.write" => { tokio::fs::write(path(input)?, text(input,"content")?).await.map_err(|error| error.to_string())?; Ok(json!({"written":true})) },
+        "filesystem.write" => write_file(input).await,
         "filesystem.list" => {
             let mut directory = tokio::fs::read_dir(path(input)?).await.map_err(|error| error.to_string())?;
             let mut entries = Vec::new();
@@ -223,6 +229,22 @@ async fn git(name: &str, input: &Value) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filesystem_write_accepts_empty_content_but_requires_a_string() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let file = std::env::temp_dir().join(format!("coucou-empty-file-{}-{}.txt", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+            std::fs::write(&file, "original").unwrap();
+            let result = write_file(&json!({"path":file,"content":""})).await;
+            let bytes = std::fs::read(&file).unwrap();
+            for invalid in [json!({"path":file}), json!({"path":file,"content":null}), json!({"path":file,"content":12})] {
+                assert!(write_file(&invalid).await.is_err());
+            }
+            std::fs::remove_file(&file).unwrap();
+            assert_eq!(result.unwrap()["written"], true);
+            assert!(bytes.is_empty(), "Saving an empty editor must clear the file");
+        });
+    }
 
     #[test]
     fn git_tools_stage_commit_switch_and_report_conflicts() {
